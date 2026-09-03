@@ -14,15 +14,20 @@ fn eol_of(src: &str) -> &'static str {
     if src.contains("\r\n") { "\r\n" } else { "\n" }
 }
 
-/// Byte offset of the start of the line containing `pos`.
+/// Byte offset of the start of the line containing `pos`. `pos` need not be a char boundary.
 fn line_start(src: &str, pos: usize) -> usize {
-    src[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0)
+    src.as_bytes()[..pos]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|i| i + 1)
+        .unwrap_or(0)
 }
 
 /// Byte offset just past the terminator of the line containing `pos` (i.e. the start of the next
 /// line), or the end of the string if `pos`'s line has no terminator (EOF).
+/// `pos` need not be a char boundary.
 fn line_end_incl_terminator(src: &str, pos: usize) -> usize {
-    match src[pos..].find('\n') {
+    match src.as_bytes()[pos..].iter().position(|&b| b == b'\n') {
         Some(i) => pos + i + 1,
         None => src.len(),
     }
@@ -193,6 +198,33 @@ mod tests {
             code_after,
             kind: CommentKind::Line,
         }
+    }
+
+    #[test]
+    fn multibyte_last_char_in_comment_does_not_panic() {
+        // Comment ends in a 3-byte char, so block.end - 1 is not a char boundary (issue #6).
+        let src = "let a = 1;\n// ─────\nlet b = 2;\n";
+        let start = src.find("//").unwrap();
+        let end = src.find("\nlet b").unwrap();
+        let b = block(src, start, end, true, false);
+        assert_eq!(
+            apply(src, vec![delete_edit(src, &b)]),
+            "let a = 1;\nlet b = 2;\n"
+        );
+        assert_eq!(
+            apply(src, vec![reduce_edit(src, &b, Language::JavaScript, "x")]),
+            "let a = 1;\n// x\nlet b = 2;\n"
+        );
+        // Same for a trailing comment and for a last line without a terminator.
+        let src = "let a = 1; // ─\nlet b = 2; // ─";
+        let s1 = src.find("//").unwrap();
+        let e1 = src.find('\n').unwrap();
+        let s2 = src.rfind("//").unwrap();
+        let edits = vec![
+            delete_edit(src, &block(src, s1, e1, false, false)),
+            delete_edit(src, &block(src, s2, src.len(), false, false)),
+        ];
+        assert_eq!(apply(src, edits), "let a = 1;\nlet b = 2;");
     }
 
     #[test]

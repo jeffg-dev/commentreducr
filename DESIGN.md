@@ -43,8 +43,16 @@ the block on `DELETE`. The system prompt states the rubric and seven few-shot de
 languages, majority DELETE) are sent as prior user/assistant turns. Only blocks that pass the
 policy gate (own-line, >= min_lines prose lines, >= min_density words/line, not code-like) reach
 the model; shorter blocks are kept untouched. Reduce mode requires the LLM: `LlmClient::check`
-runs before any file is touched, and a failed call aborts the run. There is no extractive
-fallback. `--dry-run` applies to `--delete` only.
+runs before any file is touched. There is no extractive fallback: if a call fails mid-run the
+block is left unchanged with a warning. `--dry-run` applies to `--delete` only.
+
+## Resilience
+
+The run is best-effort after the preflight. A file that cannot be read or parsed, or whose
+processing panics (a bug), is skipped with a warning and never written. Byte offsets from
+tree-sitter are char boundaries, but derived offsets (`block.end - 1`) may not be, so the
+line-scanning helpers work on bytes. Skips and LLM failures are counted in the summary and
+make the exit status 1.
 
 `--eval tools/dataset/comments.jsonl` runs the labeled dataset through the exact runtime prompt
 path and prints decision accuracy, DELETE precision/recall, and every mismatch — use it to

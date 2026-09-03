@@ -122,13 +122,18 @@ async fn main() -> Result<()> {
     }
     let stats = run(cli.path.as_deref().unwrap(), &cfg).await?;
     eprintln!(
-        "{} files scanned, {} changed; comments: {} kept, {} deleted, {} reduced",
+        "{} files scanned, {} changed, {} skipped; comments: {} kept, {} deleted, {} reduced, {} LLM failures",
         stats.files_scanned,
         stats.files_changed,
+        stats.files_skipped,
         stats.comments_kept,
         stats.comments_deleted,
         stats.comments_reduced,
+        stats.llm_errors,
     );
+    if stats.has_errors() {
+        std::process::exit(1);
+    }
     Ok(())
 }
 

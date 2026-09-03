@@ -8,8 +8,9 @@ pub mod rewrite;
 pub mod structural;
 pub mod types;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use llm::LlmClient;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::task::JoinSet;
@@ -22,6 +23,10 @@ pub struct Stats {
     pub comments_kept: usize,
     pub comments_deleted: usize,
     pub comments_reduced: usize,
+    /// Files skipped because they could not be read, parsed, or processed (bug caught).
+    pub files_skipped: usize,
+    /// Blocks left unchanged because the LLM call failed.
+    pub llm_errors: usize,
 }
 
 impl Stats {
@@ -32,6 +37,12 @@ impl Stats {
         self.comments_kept += r.kept;
         self.comments_deleted += r.deleted;
         self.comments_reduced += r.reduced;
+        self.files_skipped += r.skipped as usize;
+        self.llm_errors += r.llm_errors;
+    }
+
+    pub fn has_errors(&self) -> bool {
+        self.files_skipped > 0 || self.llm_errors > 0
     }
 }
 
@@ -42,14 +53,19 @@ struct FileResult {
     kept: usize,
     deleted: usize,
     reduced: usize,
+    skipped: bool,
+    llm_errors: usize,
 }
 
 /// Process every tracked source file under `root`.
 /// Per file: read (skip non-UTF-8 with a warning), extract_comments -> group_blocks, for each block
-/// analyze + is_structural + decide; Reduce actions call the LLM with bounded concurrency and any
-/// LLM failure aborts the whole run; build edits; rewrite::apply; write back only if changed
-/// (unless dry_run, in which case print a per-file summary of changes).
-/// In reduce mode the endpoint is checked before any file is touched.
+/// analyze + is_structural + decide; Reduce actions call the LLM with bounded concurrency; build
+/// edits; rewrite::apply; write back only if changed (unless dry_run, in which case print a
+/// per-file summary of changes).
+/// In reduce mode the endpoint is checked before any file is touched. After that the run is
+/// best-effort: a failed LLM call leaves that block unchanged, and a panic while processing a file
+/// (a bug) skips that file. Both are warned about and counted in `Stats`; nothing is written for a
+/// file unless its whole pass succeeded.
 /// Files are processed concurrently on the tokio runtime.
 pub async fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     let tracked = files::tracked_source_files(root)?;
@@ -61,46 +77,63 @@ pub async fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     let cfg = Arc::new(cfg.clone());
 
     let mut set = JoinSet::new();
+    let mut paths = HashMap::new();
     for (path, lang) in tracked.iter().cloned() {
-        set.spawn(process_file(path, lang, llm.clone(), cfg.clone()));
+        let handle = set.spawn(process_file(path.clone(), lang, llm.clone(), cfg.clone()));
+        paths.insert(handle.id(), path);
     }
 
     let mut stats = Stats {
         files_scanned: tracked.len(),
         ..Stats::default()
     };
-    while let Some(res) = set.join_next().await {
-        stats.merge(res??);
+    while let Some(res) = set.join_next_with_id().await {
+        match res {
+            Ok((_, r)) => stats.merge(r),
+            Err(err) => {
+                let path = paths.get(&err.id()).map(|p| p.display().to_string());
+                eprintln!(
+                    "warning: skipping {} (internal error: {})",
+                    path.as_deref().unwrap_or("?"),
+                    panic_message(err)
+                );
+                stats.files_skipped += 1;
+            }
+        }
     }
     Ok(stats)
 }
 
 /// Read, analyze and (if anything changed) rewrite one file. Recoverable failures (unreadable /
-/// non-UTF-8 file, a parser error) are reported with a warning and the file is skipped.
-/// An LLM failure is not recoverable: it is returned as an error and aborts the run.
+/// non-UTF-8 file, a parser error) are reported with a warning and the file is skipped; a failed
+/// LLM call leaves that block unchanged.
 async fn process_file(
     path: PathBuf,
     lang: Language,
     llm: Arc<Option<LlmClient>>,
     cfg: Arc<Config>,
-) -> Result<FileResult> {
-    let mut result = FileResult::default();
+) -> FileResult {
+    let mut result = FileResult {
+        skipped: true,
+        ..FileResult::default()
+    };
 
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(err) => {
             eprintln!("warning: skipping {} (unreadable: {err})", path.display());
-            return Ok(result);
+            return result;
         }
     };
 
     let comments = match parse::extract_comments(&src, lang) {
         Ok(c) => c,
         Err(err) => {
-            eprintln!("skipping {path}: {err}", path = path.display());
-            return Ok(result);
+            eprintln!("warning: skipping {} ({err})", path.display());
+            return result;
         }
     };
+    result.skipped = false;
     let blocks = parse::group_blocks(&src, comments);
     let lines: Vec<&str> = src.lines().collect();
 
@@ -127,14 +160,22 @@ async fn process_file(
             Action::Reduce { prose } => {
                 let context = first_nonblank_after(&lines, block.end_line);
                 let line = block.start_line + 1;
-                let client = llm
-                    .as_ref()
-                    .as_ref()
-                    .context("reduce mode requires an LLM")?;
-                let verdict = client
+                let client = llm.as_ref().as_ref().expect("reduce mode has an LLM");
+                let verdict = match client
                     .summarize(&prose, &context, cfg.max_summary_words)
                     .await
-                    .with_context(|| format!("{}:{line}: LLM failed", path.display()))?;
+                {
+                    Ok(v) => v,
+                    Err(err) => {
+                        eprintln!(
+                            "warning: {}:{line}: left unchanged, LLM failed ({err:#})",
+                            path.display()
+                        );
+                        result.llm_errors += 1;
+                        result.kept += 1;
+                        continue;
+                    }
+                };
                 match verdict {
                     llm::Verdict::Delete => {
                         result.deleted += 1;
@@ -160,7 +201,7 @@ async fn process_file(
     }
 
     if edits.is_empty() {
-        return Ok(result);
+        return result;
     }
 
     let new_src = rewrite::apply(&src, edits);
@@ -174,7 +215,22 @@ async fn process_file(
         }
     }
 
-    Ok(result)
+    result
+}
+
+/// Best-effort text of a task panic.
+fn panic_message(err: tokio::task::JoinError) -> String {
+    if !err.is_panic() {
+        return err.to_string();
+    }
+    let payload = err.into_panic();
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "panic".to_string()
+    }
 }
 
 /// First non-blank line strictly after `end_line` (0-based), trimmed and capped at 120 chars.

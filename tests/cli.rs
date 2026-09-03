@@ -173,9 +173,41 @@ fn delete_dry_run_counts_but_writes_nothing() {
         .assert()
         .success()
         .stdout(predicates::str::contains(": delete "))
-        .stderr(predicates::str::contains("4 files scanned, 4 changed"));
+        .stderr(predicates::str::contains(
+            "4 files scanned, 4 changed, 0 skipped",
+        ));
 
     assert_eq!(snapshot(dir.path()), before, "dry run modified files");
+}
+
+#[test]
+fn broken_file_is_skipped_and_others_still_processed() {
+    let dir = setup_repo();
+    std::fs::write(dir.path().join("bad.py"), b"# comment\ndef f(:\n  \xff\n").unwrap();
+    std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+
+    Command::cargo_bin("commentreducr")
+        .unwrap()
+        .arg(dir.path())
+        .arg("--delete")
+        .assert()
+        .code(1)
+        .stderr(predicates::str::contains("warning: skipping"))
+        .stderr(predicates::str::contains(
+            "5 files scanned, 4 changed, 1 skipped",
+        ));
+
+    for f in FIXTURES {
+        assert!(
+            !read(dir.path(), f.name).contains(f.init_comment),
+            "{}: not processed",
+            f.name
+        );
+    }
 }
 
 #[test]

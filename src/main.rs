@@ -8,7 +8,12 @@ use std::path::PathBuf;
 #[command(name = "commentreducr", version)]
 struct Cli {
     /// Directory to process (git-tracked files under it, recursively).
-    path: PathBuf,
+    #[arg(required_unless_present = "eval")]
+    path: Option<PathBuf>,
+
+    /// Evaluate the LLM prompt against a labeled JSONL dataset instead of processing files.
+    #[arg(long, value_name = "JSONL")]
+    eval: Option<PathBuf>,
 
     /// Reduce large dense comment blocks to one line (default).
     #[arg(long, conflicts_with = "delete")]
@@ -72,7 +77,10 @@ async fn main() -> Result<()> {
         dry_run: cli.dry_run,
         verbose: cli.verbose,
     };
-    let stats = run(&cli.path, &cfg).await?;
+    if let Some(dataset) = &cli.eval {
+        return commentreducr::eval::run(dataset, &cfg).await;
+    }
+    let stats = run(cli.path.as_deref().unwrap(), &cfg).await?;
     eprintln!(
         "{} files scanned, {} changed; comments: {} kept, {} deleted, {} reduced ({} extractive fallbacks)",
         stats.files_scanned,

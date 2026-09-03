@@ -8,6 +8,87 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
+/// What the model decided about a comment block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    /// The comment carries nothing the code does not already say.
+    Delete,
+    /// Replace the block with this single terse line.
+    Line(String),
+}
+
+const SYSTEM_PROMPT: &str = "You decide what to do with a source code comment. Reply with exactly one line: \
+either the single word DELETE, or a replacement comment of at most {max_words} words. No quotes, \
+no markdown, no preamble, no comment delimiters.\n\n\
+Keep (rewritten tersely) only if the comment tells the reader something the code cannot: a \
+surprising or non-obvious behaviour, invariant or constraint; a danger or caution (thread safety, \
+security, data loss, ordering, units, performance cliff, must-call-X-first); or a workaround for an \
+external bug or quirk that would otherwise look like a mistake. Name the surprise or danger \
+directly and drop everything else. Preserve identifiers verbatim.\n\n\
+DELETE if the comment merely restates or narrates what the code does, gives history, tickets, \
+authors or dates, describes how other code or modules behave, explains design rationale that is \
+evident from the code, teaches general library or language facts, is commented-out code, or is \
+filler. Most comments should be DELETE.";
+
+/// Few-shot demos: (comment prose, next code line, expected reply).
+const DEMOS: &[(&str, &str, &str)] = &[
+    (
+        "Loop over each user in the list and check whether their subscription has expired. If it \
+         has, add them to the expired list so we can send the reminder email later on in the batch job.",
+        "for user in users:",
+        "DELETE",
+    ),
+    (
+        "Important: this must be called with the lock held. The cache map is not thread safe and \
+         we've seen corruption in production when two workers refresh at the same time. See the \
+         incident from last March.",
+        "def _refresh_cache(self):",
+        "Caller must hold self._lock; the cache map is not thread safe",
+    ),
+    (
+        "Previously this used the legacy HttpClient from utils/http, but that was removed in the v3 \
+         refactor (ticket PLAT-2211). The new fetch wrapper handles retries itself, so we just call \
+         it here and let the middleware layer deal with auth headers.",
+        "const res = await fetchJson(url);",
+        "DELETE",
+    ),
+    (
+        "Note that the timeout here is in seconds, not milliseconds like everywhere else in this \
+         file, because the upstream API multiplies it by 1000 on its side. Passing 5000 here means \
+         the request will wait over an hour.",
+        "timeout: 5,",
+        "timeout is seconds, not ms; upstream multiplies by 1000",
+    ),
+    (
+        "We use Array.prototype.reduce here to build up the lookup object in a single pass. reduce \
+         takes an accumulator and the current item and returns the new accumulator, which is more \
+         efficient than creating a new object each iteration with the spread operator.",
+        "const byId = items.reduce((acc, item) => {",
+        "DELETE",
+    ),
+    (
+        "Ugly hack: we sleep for 50ms before closing because the underlying C library (libfoo 2.3) \
+         drops the last buffered write if close() is called immediately after write(). This is fixed \
+         upstream in 2.4 but we can't upgrade yet.",
+        "time.sleep(0.05)",
+        "libfoo 2.3 drops the last buffered write if close() follows write() immediately",
+    ),
+    (
+        "Initialize the running total to zero. Then for every row that matches the filter, add its \
+         amount to the total. Finally return the total to the caller.",
+        "total = 0",
+        "DELETE",
+    ),
+];
+
+fn user_message(prose: &str, context: &str) -> String {
+    let mut m = format!("Comment:\n{prose}");
+    if !context.is_empty() {
+        m.push_str(&format!("\n\nNext code line: {context}"));
+    }
+    m
+}
+
 pub struct LlmClient {
     client: reqwest::Client,
     endpoint: String,
@@ -52,34 +133,30 @@ impl LlmClient {
         }
     }
 
-    /// Summarize `prose` to a single line of at most ~`max_words` words. `context` is the first
-    /// non-blank code line following the comment (may be empty) and is passed to the model as a hint.
-    /// Returns Err on transport failure or if the model output is unusable (empty / multi-line after
-    /// cleanup). Caller falls back to the extractive summary.
-    pub async fn summarize(&self, prose: &str, context: &str, max_words: usize) -> Result<String> {
+    /// Ask the model what to do with a comment block. `prose` is the cleaned comment text and
+    /// `context` the first non-blank code line after it (may be empty). Returns Err on transport
+    /// failure or unusable output; the caller then falls back to the extractive summary.
+    pub async fn summarize(&self, prose: &str, context: &str, max_words: usize) -> Result<Verdict> {
         let _permit = self
             .semaphore
             .acquire()
             .await
             .map_err(|e| anyhow!("semaphore closed: {e}"))?;
 
-        let system = format!(
-            "You condense multi-line source code comments into a single line. Reply with exactly \
-             one line of plain text, no more than {max_words} words, no quotes, no markdown, no \
-             preamble. Preserve identifiers and technical terms verbatim."
-        );
-        let mut user = prose.to_string();
-        if !context.is_empty() {
-            user.push_str(&format!("\n\nThe comment precedes this code: {context}"));
+        let mut messages = vec![json!({
+            "role": "system",
+            "content": SYSTEM_PROMPT.replace("{max_words}", &max_words.to_string()),
+        })];
+        for (demo_prose, demo_ctx, reply) in DEMOS {
+            messages.push(json!({"role": "user", "content": user_message(demo_prose, demo_ctx)}));
+            messages.push(json!({"role": "assistant", "content": reply}));
         }
+        messages.push(json!({"role": "user", "content": user_message(prose, context)}));
 
         let body = json!({
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "max_tokens": 64,
+            "messages": messages,
+            "max_tokens": 48,
             "temperature": 0,
         });
 
@@ -94,14 +171,14 @@ impl LlmClient {
         if cleaned.is_empty() {
             bail!("empty reply from LLM after cleanup");
         }
-        let word_count = cleaned.split_whitespace().count();
-        if word_count > 3 * max_words {
-            bail!(
-                "LLM reply too long: {word_count} words (limit {})",
-                3 * max_words
-            );
+        if cleaned.trim_end_matches(['.', '!']).eq_ignore_ascii_case("delete") {
+            return Ok(Verdict::Delete);
         }
-        Ok(cleaned)
+        let word_count = cleaned.split_whitespace().count();
+        if word_count > 2 * max_words {
+            bail!("LLM reply too long: {word_count} words (limit {})", 2 * max_words);
+        }
+        Ok(Verdict::Line(cleaned))
     }
 
     async fn post(&self, url: &str, body: &serde_json::Value) -> Result<String> {

@@ -1,3 +1,4 @@
+pub mod eval;
 pub mod files;
 pub mod llm;
 pub mod parse;
@@ -121,30 +122,37 @@ async fn process_file(
                 edits.push(rewrite::delete_edit(&src, block));
             }
             Action::Reduce { prose, fallback } => {
-                result.reduced += 1;
                 let context = first_nonblank_after(&lines, block.end_line);
-                let summary = match llm.as_ref() {
+                let verdict = match llm.as_ref() {
                     Some(client) => match client
                         .summarize(&prose, &context, cfg.max_summary_words)
                         .await
                     {
-                        Ok(s) => s,
+                        Ok(v) => v,
                         Err(_) => {
                             result.llm_fallbacks += 1;
-                            fallback
+                            llm::Verdict::Line(fallback)
                         }
                     },
-                    None => fallback,
+                    None => llm::Verdict::Line(fallback),
                 };
-                if cfg.dry_run || cfg.verbose {
-                    println!(
-                        "{}:{}: reduce -> {}",
-                        path.display(),
-                        block.start_line + 1,
-                        summary
-                    );
+                let line = block.start_line + 1;
+                match verdict {
+                    llm::Verdict::Delete => {
+                        result.deleted += 1;
+                        if cfg.dry_run || cfg.verbose {
+                            println!("{}:{line}: delete {} lines (llm)", path.display(), block.line_count());
+                        }
+                        edits.push(rewrite::delete_edit(&src, block));
+                    }
+                    llm::Verdict::Line(summary) => {
+                        result.reduced += 1;
+                        if cfg.dry_run || cfg.verbose {
+                            println!("{}:{line}: reduce -> {summary}", path.display());
+                        }
+                        edits.push(rewrite::reduce_edit(&src, block, lang, &summary));
+                    }
                 }
-                edits.push(rewrite::reduce_edit(&src, block, lang, &summary));
             }
         }
     }

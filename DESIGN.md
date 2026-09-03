@@ -32,7 +32,24 @@ comments, `#region/#endregion`, `/// <reference`, `//# sourceMappingURL`, `//# s
 Both: license/copyright/SPDX text anywhere in the block; any block that starts at line 0 or 1
 of the file and mentions license/copyright.
 
-## LLM
+## LLM verdict protocol
+
+The user's comment philosophy: a comment earns its place only when it says something the code
+cannot — a surprise, a danger, a caution, a workaround for an external quirk. Everything else
+(narration, history, tickets, descriptions of other code, rationale evident from the code,
+library education, commented-out code) should go. So the model does not "summarize": it replies
+either `DELETE` or one terse line (<= max_words). `llm::Verdict` carries that; reduce mode deletes
+the block on `DELETE`. The system prompt states the rubric and seven few-shot demos (both
+languages, majority DELETE) are sent as prior user/assistant turns. Only blocks that pass the
+policy gate (own-line, >= min_lines prose lines, >= min_density words/line, not code-like) reach
+the model; shorter blocks are kept untouched. Without an endpoint (`--no-llm`) the extractive
+one-liner is used and nothing is deleted.
+
+`--eval tools/dataset/comments.jsonl` runs the labeled dataset through the exact runtime prompt
+path and prints decision accuracy, DELETE precision/recall, and every mismatch — use it to
+iterate on the prompt or demos.
+
+## LLM endpoint
 
 OpenAI-compatible `/v1/chat/completions`, default `http://localhost:8000/v1`, model
 `gemma-4-e2b-it-4bit` (oMLX). Tested: `temperature: 0`, `max_tokens: 60`, system prompt

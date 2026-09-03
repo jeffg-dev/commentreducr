@@ -5,13 +5,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Runs `git ls-files -z` in `root` and returns tracked files with a supported extension,
-/// as absolute paths paired with their language. `root` may be a subdirectory of the repo;
-/// only files under it are returned.
+/// as absolute paths paired with their language. `root` may be a subdirectory of the repo
+/// (only files under it are returned) or a single tracked file.
 pub fn tracked_source_files(root: &Path) -> Result<Vec<(PathBuf, Language)>> {
+    let (dir, pathspec) = if root.is_file() {
+        let parent = root.parent().filter(|p| !p.as_os_str().is_empty());
+        (parent.unwrap_or(Path::new(".")), root.file_name())
+    } else {
+        (root, None)
+    };
     let output = Command::new("git")
         .arg("ls-files")
         .arg("-z")
-        .current_dir(root)
+        .args(pathspec)
+        .current_dir(dir)
         .output()
         .with_context(|| format!("failed to run `git ls-files` in {}", root.display()))?;
 
@@ -23,7 +30,7 @@ pub fn tracked_source_files(root: &Path) -> Result<Vec<(PathBuf, Language)>> {
         );
     }
 
-    let root = root
+    let root = dir
         .canonicalize()
         .with_context(|| format!("failed to canonicalize {}", root.display()))?;
 

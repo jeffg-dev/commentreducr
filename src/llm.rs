@@ -100,25 +100,10 @@ const DEMOS: &[(&str, &str, &str)] = &[
         "DELETE",
     ),
     (
-        "Careful with the order here. We have to flush and close the handle before calling \
-         rename(), otherwise on NFS mounts the rename can land before the last buffer is written \
-         and readers see a truncated file. Bit us in the export job for weeks.",
-        "fh.close()",
-        "close() must precede rename(); on NFS the last buffer can land after the rename",
-    ),
-    (
-        "This looks redundant but it isn't: axios treats a 3xx as success only when maxRedirects \
-         is 0, and with the default it follows the redirect and strips our custom auth header, so \
-         we end up with an HTML login page parsed as JSON. Handle redirects by hand.",
-        "const res = await axios.get(url, { maxRedirects: 0 });",
-        "axios strips the custom auth header on redirects; follow them manually",
-    ),
-    (
-        "FYI: this dict is created once at import time and shared by every request handler in the \
-         process. Mutating it from a handler leaks state between users, which is exactly what \
-         happened in the profile bug last quarter. Copy it first if you need to change anything.",
-        "DEFAULT_HEADERS = {",
-        "shared across requests; copy before mutating",
+        "Initialize the running total to zero. Then for every row that matches the filter, add its \
+         amount to the total. Finally return the total to the caller.",
+        "total = 0",
+        "DELETE",
     ),
 ];
 

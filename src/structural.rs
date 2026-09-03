@@ -59,8 +59,9 @@ static LICENSE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b(license|copyright|SPDX)\b").unwrap());
 
 /// True if the block (or any comment in it) is structural and must be preserved in both modes.
-/// `src` is the full file source (needed e.g. to know the block is at the top of the file).
-pub fn is_structural(block: &CommentBlock, lang: Language, src: &str) -> bool {
+/// `src` is unused now that license/copyright/SPDX detection no longer depends on file position,
+/// but is kept in the signature per the module contract.
+pub fn is_structural(block: &CommentBlock, lang: Language, _src: &str) -> bool {
     // Python shebang: the very first byte of the file.
     if lang == Language::Python && block.start == 0 {
         if let Some(first) = block.comments.first() {
@@ -89,9 +90,9 @@ pub fn is_structural(block: &CommentBlock, lang: Language, src: &str) -> bool {
         return true;
     }
 
-    // License/copyright/SPDX header: only counts near the top of the file.
-    let near_top = block.start_line <= 1 || src[..block.start].trim().is_empty();
-    if near_top && block.comments.iter().any(|c| LICENSE_RE.is_match(&c.text)) {
+    // License/copyright/SPDX text anywhere in the block is always structural (per DESIGN.md),
+    // regardless of where in the file it appears.
+    if block.comments.iter().any(|c| LICENSE_RE.is_match(&c.text)) {
         return true;
     }
 

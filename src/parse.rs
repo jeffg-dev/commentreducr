@@ -120,7 +120,8 @@ pub fn group_blocks(src: &str, comments: Vec<Comment>) -> Vec<CommentBlock> {
         let can_merge = c.kind == CommentKind::Line
             && c.own_line
             && blocks.last().is_some_and(|last| {
-                !last.code_after
+                last.own_line
+                    && !last.code_after
                     && c.start_line == last.end_line + 1
                     && leading_whitespace(src, c.start) == last.indent
             });
@@ -165,6 +166,21 @@ mod tests {
         assert_eq!(blocks[1].comments.len(), 1);
         assert!(!blocks[1].own_line);
         assert!(blocks[1].code_after == false);
+    }
+
+    #[test]
+    fn trailing_comment_does_not_merge_with_following_own_line_comment() {
+        // A trailing comment (own_line=false) followed by an own-line comment at the same
+        // indent must NOT merge into one block, even though their line-level indentation
+        // (leading_whitespace of the whole line) happens to coincide.
+        let src = "def f():\n    x = 1  # trailing comment\n    # unrelated standalone comment\n    y = 2\n";
+        let comments = extract_comments(src, Language::Python).unwrap();
+        let blocks = group_blocks(src, comments);
+        assert_eq!(blocks.len(), 2);
+        assert!(!blocks[0].own_line);
+        assert_eq!(blocks[0].comments.len(), 1);
+        assert!(blocks[1].own_line);
+        assert_eq!(blocks[1].comments.len(), 1);
     }
 
     #[test]

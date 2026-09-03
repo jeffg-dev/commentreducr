@@ -38,7 +38,7 @@ static RULES: LazyLock<Vec<(Scope, Regex)>> = LazyLock::new(|| {
         // @preserve, @generated, #region/#endregion, webpack/vite magic comments.
         (
             Scope::Js,
-            r"(?i)(eslint-(disable|enable)(-next-line|-line)?\b|@ts-(ignore|expect-error|nocheck|check)\b|prettier-ignore\b|biome-ignore\b|istanbul ignore\b|c8 ignore\b|v8 ignore\b|@flow\b|@jsx[-\w]*|@license\b|@preserve\b|@generated\b|#region\b|#endregion\b|\bwebpack\w*\s*:|\bvite\b\s*:?\s*ignore)",
+            r"(?i)(eslint-(disable|enable)(-next-line|-line)?\b|@ts-(ignore|expect-error|nocheck|check)\b|prettier-ignore\b|biome-ignore\b|istanbul ignore\b|c8 ignore\b|v8 ignore\b|@flow\b|@jsx[-\w]*|@license\b|@preserve\b|@generated\b|#region\b|#endregion\b|\bwebpack\w*\s*:|@vite-ignore\b|\bvite\b\s*:?\s*ignore)",
         ),
         // JS/TS: reference/sourcemap directives anchored at the start of the comment.
         (
@@ -146,6 +146,7 @@ mod tests {
             ("/** JSDoc comment */", Language::JavaScript, 0, 0, true),
             ("// TODO: fix this later", Language::JavaScript, 200, 20, true),
             ("// Copyright 2024 Acme Corp", Language::JavaScript, 0, 0, true),
+            ("/* @vite-ignore */", Language::JavaScript, 50, 3, true),
         ];
         for (text, lang, start, start_line, expected) in cases {
             let block = block_for(text, *start, *start_line);

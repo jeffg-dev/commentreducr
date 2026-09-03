@@ -88,7 +88,13 @@ pub fn delete_edit(src: &str, block: &CommentBlock) -> Edit {
         if byte_after_is_space && (start == line_st || byte_before_is_space) {
             removed_end += 1;
         }
-        Edit { start, end: removed_end, replacement: String::new() }
+        // If neither side of the comment is whitespace, deleting it verbatim would glue the
+        // surrounding tokens together (e.g. `return/* c */undefined` -> `returnundefined`).
+        // Insert a single space to keep them separate.
+        let left_glue = start > 0 && !bytes[start - 1].is_ascii_whitespace();
+        let right_glue = removed_end < src.len() && !bytes[removed_end].is_ascii_whitespace();
+        let replacement = if left_glue && right_glue { " " } else { "" };
+        Edit { start, end: removed_end, replacement: replacement.to_string() }
     } else {
         // Trailing comment (code before, nothing after): walk back over spaces/tabs from
         // block.start to the end of the code, keep the line terminator.
@@ -184,6 +190,17 @@ mod tests {
         let edit = delete_edit(src, &b);
         let out = apply(src, vec![edit]);
         assert_eq!(out, "let a = 1;\nlet b = 2;\n");
+    }
+
+    #[test]
+    fn inline_block_comment_deletion_does_not_glue_adjacent_tokens() {
+        let src = "function f() {\n  return/* explicit */undefined;\n}\n";
+        let start = src.find("/* explicit */").unwrap();
+        let end = start + "/* explicit */".len();
+        let b = block(src, start, end, false, true);
+        let edit = delete_edit(src, &b);
+        let out = apply(src, vec![edit]);
+        assert_eq!(out, "function f() {\n  return undefined;\n}\n");
     }
 
     #[test]

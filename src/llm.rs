@@ -1,8 +1,10 @@
 //! OpenAI-compatible chat completions client used to abstractively summarize a comment.
 use crate::types::Config;
 use anyhow::{Context, Result, anyhow, bail};
+use regex::Regex;
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::LazyLock;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -123,12 +125,35 @@ impl LlmClient {
     }
 }
 
-/// Take the first non-empty line, trim, strip wrapping quotes/backticks, strip a leading
-/// "#", "//" or "*" run, collapse internal whitespace, strip trailing "*/".
+/// Matches a leading conversational preamble ("Here is the summary: ...", "Sure, ...:") up to
+/// and including its colon, so it can be stripped and the real content kept.
+static PREAMBLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^(here('s| is)\b|sure\b|certainly\b|the (one[- ]line )?summary( is)?\b)[^:]{0,40}:\s*")
+        .unwrap()
+});
+
+/// Take the first non-empty, non-fence line, trim, strip a leading conversational preamble,
+/// strip wrapping quotes/backticks, strip a leading "#", "//" or "*" run, collapse internal
+/// whitespace, strip trailing "*/". Returns "" if nothing usable remains (e.g. the cleaned
+/// text is empty, only punctuation, or a single very short token).
 fn clean_reply(raw: &str) -> String {
-    let Some(mut line) = raw.lines().map(str::trim).find(|l| !l.is_empty()) else {
+    // Skip markdown code-fence marker lines (```lang / ```) entirely rather than treating them
+    // as content.
+    let Some(mut line) = raw
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with("```"))
+        .find(|l| !l.is_empty())
+    else {
         return String::new();
     };
+
+    if let Some(m) = PREAMBLE_RE.find(line) {
+        let rest = line[m.end()..].trim();
+        if !rest.is_empty() {
+            line = rest;
+        }
+    }
 
     // Strip wrapping quotes/backticks.
     loop {
@@ -153,7 +178,18 @@ fn clean_reply(raw: &str) -> String {
     let line = line.trim_end().trim_end_matches("*/").trim_end();
 
     // Collapse internal whitespace.
-    line.split_whitespace().collect::<Vec<_>>().join(" ")
+    let cleaned = line.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // Reject junk that shouldn't be accepted as a summary: pure punctuation (e.g. a stray
+    // backtick left over from a mangled fence), or a single token too short to be a real word.
+    if cleaned.is_empty() || cleaned.chars().all(|c| !c.is_alphanumeric()) {
+        return String::new();
+    }
+    if !cleaned.contains(' ') && cleaned.len() < 3 {
+        return String::new();
+    }
+
+    cleaned
 }
 
 #[cfg(test)]
@@ -176,5 +212,27 @@ mod tests {
     #[test]
     fn empty_reply_is_empty() {
         assert_eq!(clean_reply("\n\n  \n"), "");
+    }
+
+    #[test]
+    fn markdown_fence_is_skipped_not_mangled() {
+        assert_eq!(
+            clean_reply("```\nThis function computes epsilon for the solver.\n```"),
+            "This function computes epsilon for the solver."
+        );
+    }
+
+    #[test]
+    fn conversational_preamble_is_stripped() {
+        assert_eq!(
+            clean_reply("Here is the one line summary: parses the config file"),
+            "parses the config file"
+        );
+    }
+
+    #[test]
+    fn lone_punctuation_reply_is_rejected() {
+        assert_eq!(clean_reply("```"), "");
+        assert_eq!(clean_reply("`"), "");
     }
 }

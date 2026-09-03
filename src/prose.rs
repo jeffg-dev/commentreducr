@@ -22,14 +22,14 @@ pub struct ProseAnalysis {
 }
 
 const STOPWORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "but", "if", "then", "else", "when", "at", "by", "for",
-    "with", "about", "against", "between", "into", "through", "during", "before", "after",
-    "above", "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under",
-    "again", "further", "once", "here", "there", "all", "any", "both", "each", "few", "more",
-    "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than",
-    "too", "very", "can", "will", "just", "should", "now", "is", "are", "was", "were", "be",
-    "been", "being", "have", "has", "had", "do", "does", "did", "this", "that", "these",
-    "those", "of", "it", "its", "as", "which", "who", "what",
+    "a", "an", "the", "and", "or", "but", "if", "then", "else", "when", "at", "by", "for", "with",
+    "about", "against", "between", "into", "through", "during", "before", "after", "above",
+    "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under", "again",
+    "further", "once", "here", "there", "all", "any", "both", "each", "few", "more", "most",
+    "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too",
+    "very", "can", "will", "just", "should", "now", "is", "are", "was", "were", "be", "been",
+    "being", "have", "has", "had", "do", "does", "did", "this", "that", "these", "those", "of",
+    "it", "its", "as", "which", "who", "what",
 ];
 
 /// Strip comment delimiters/leaders from each raw line of the block: `#`, `//`, `/*`, `*/`,
@@ -83,8 +83,20 @@ fn is_code_like(line: &str) -> bool {
         return true;
     }
     const STARTERS: &[&str] = &[
-        "def ", "class ", "import ", "from ", "return ", "if ", "for ", "while ", "const ",
-        "let ", "var ", "function ", "export ", "}",
+        "def ",
+        "class ",
+        "import ",
+        "from ",
+        "return ",
+        "if ",
+        "for ",
+        "while ",
+        "const ",
+        "let ",
+        "var ",
+        "function ",
+        "export ",
+        "}",
     ];
     if STARTERS.iter().any(|s| t.starts_with(s)) {
         return true;
@@ -93,10 +105,10 @@ fn is_code_like(line: &str) -> bool {
         return true;
     }
     // bare assignment like `foo = bar(`
-    if let Some(idx) = t.find(" = ") {
-        if t[idx + 3..].contains('(') {
-            return true;
-        }
+    if let Some(idx) = t.find(" = ")
+        && t[idx + 3..].contains('(')
+    {
+        return true;
     }
     let total = t.chars().count();
     let punct = t
@@ -244,12 +256,16 @@ mod tests {
     fn cleans_line_comments() {
         let block = line_block(&["// hello world", "/// doc line"]);
         let lines = clean_lines(&block, Language::JavaScript);
-        assert_eq!(lines, vec!["hello world".to_string(), "doc line".to_string()]);
+        assert_eq!(
+            lines,
+            vec!["hello world".to_string(), "doc line".to_string()]
+        );
     }
 
     #[test]
     fn short_first_sentence_used_verbatim() {
-        let block = line_block(&["This explains the thing. And here is more detail to pad it out."]);
+        let block =
+            line_block(&["This explains the thing. And here is more detail to pad it out."]);
         let a = analyze(&block, Language::JavaScript, 10);
         assert_eq!(a.extractive, "This explains the thing.");
     }

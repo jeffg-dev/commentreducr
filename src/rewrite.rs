@@ -73,7 +73,11 @@ pub fn delete_edit(src: &str, block: &CommentBlock) -> Edit {
             }
         }
 
-        Edit { start, end, replacement: String::new() }
+        Edit {
+            start,
+            end,
+            replacement: String::new(),
+        }
     } else if block.code_after {
         // Inline block comment with code after (e.g. `foo(/* x */ 1)`), or own-line block
         // comment with code after on the same line (e.g. `/* x */ let y;`). code_after can
@@ -94,7 +98,11 @@ pub fn delete_edit(src: &str, block: &CommentBlock) -> Edit {
         let left_glue = start > 0 && !bytes[start - 1].is_ascii_whitespace();
         let right_glue = removed_end < src.len() && !bytes[removed_end].is_ascii_whitespace();
         let replacement = if left_glue && right_glue { " " } else { "" };
-        Edit { start, end: removed_end, replacement: replacement.to_string() }
+        Edit {
+            start,
+            end: removed_end,
+            replacement: replacement.to_string(),
+        }
     } else {
         // Trailing comment (code before, nothing after): walk back over spaces/tabs from
         // block.start to the end of the code, keep the line terminator.
@@ -103,7 +111,11 @@ pub fn delete_edit(src: &str, block: &CommentBlock) -> Edit {
         while start > 0 && (bytes[start - 1] == b' ' || bytes[start - 1] == b'\t') {
             start -= 1;
         }
-        Edit { start, end: block.end, replacement: String::new() }
+        Edit {
+            start,
+            end: block.end,
+            replacement: String::new(),
+        }
     }
 }
 
@@ -113,15 +125,19 @@ pub fn reduce_edit(src: &str, block: &CommentBlock, lang: Language, summary: &st
     let start = block.start - block.indent.len();
     let last_pos = block.end.saturating_sub(1).max(block.start);
     let last_line_end_with_term = line_end_incl_terminator(src, last_pos);
-    let had_terminator = last_line_end_with_term <= src.len()
-        && src[..last_line_end_with_term].ends_with('\n');
+    let had_terminator =
+        last_line_end_with_term <= src.len() && src[..last_line_end_with_term].ends_with('\n');
     let end = last_line_end_with_term;
 
     let eol = if had_terminator { eol_of(src) } else { "" };
     let prefix = lang.line_prefix();
     let replacement = format!("{}{} {}{}", block.indent, prefix, summary, eol);
 
-    Edit { start, end, replacement }
+    Edit {
+        start,
+        end,
+        replacement,
+    }
 }
 
 /// Apply non-overlapping edits (any order) and return the new source.
@@ -129,7 +145,10 @@ pub fn apply(src: &str, edits: Vec<Edit>) -> String {
     let mut edits = edits;
     edits.sort_by(|a, b| b.start.cmp(&a.start));
 
-    debug_assert!(edits.windows(2).all(|w| w[0].start >= w[1].end), "overlapping edits");
+    debug_assert!(
+        edits.windows(2).all(|w| w[0].start >= w[1].end),
+        "overlapping edits"
+    );
 
     let mut out = src.to_string();
     for edit in &edits {
@@ -143,7 +162,13 @@ mod tests {
     use super::*;
     use crate::types::{Comment, CommentKind};
 
-    fn block(src: &str, start: usize, end: usize, own_line: bool, code_after: bool) -> CommentBlock {
+    fn block(
+        src: &str,
+        start: usize,
+        end: usize,
+        own_line: bool,
+        code_after: bool,
+    ) -> CommentBlock {
         let indent_start = line_start(src, start);
         let indent = src[indent_start..start].to_string();
         let start_line = src[..start].matches('\n').count();

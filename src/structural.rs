@@ -63,12 +63,13 @@ static LICENSE_RE: LazyLock<Regex> =
 /// but is kept in the signature per the module contract.
 pub fn is_structural(block: &CommentBlock, lang: Language, _src: &str) -> bool {
     // Python shebang: the very first byte of the file.
-    if lang == Language::Python && block.start == 0 {
-        if let Some(first) = block.comments.first() {
-            if first.start == 0 && first.text.starts_with("#!") {
-                return true;
-            }
-        }
+    if lang == Language::Python
+        && block.start == 0
+        && let Some(first) = block.comments.first()
+        && first.start == 0
+        && first.text.starts_with("#!")
+    {
+        return true;
     }
 
     // PEP 263 coding cookie: must be on line 0 or 1 of the file.
@@ -142,10 +143,28 @@ mod tests {
             ("# -*- coding: utf-8 -*-", Language::Python, 0, 0, true),
             ("# noqa: E501", Language::Python, 100, 5, true),
             ("# just a plain comment", Language::Python, 100, 5, false),
-            ("// eslint-disable-next-line no-unused-vars", Language::JavaScript, 50, 3, true),
+            (
+                "// eslint-disable-next-line no-unused-vars",
+                Language::JavaScript,
+                50,
+                3,
+                true,
+            ),
             ("/** JSDoc comment */", Language::JavaScript, 0, 0, true),
-            ("// TODO: fix this later", Language::JavaScript, 200, 20, true),
-            ("// Copyright 2024 Acme Corp", Language::JavaScript, 0, 0, true),
+            (
+                "// TODO: fix this later",
+                Language::JavaScript,
+                200,
+                20,
+                true,
+            ),
+            (
+                "// Copyright 2024 Acme Corp",
+                Language::JavaScript,
+                0,
+                0,
+                true,
+            ),
             ("/* @vite-ignore */", Language::JavaScript, 50, 3, true),
         ];
         for (text, lang, start, start_line, expected) in cases {

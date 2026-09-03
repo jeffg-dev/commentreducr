@@ -2,7 +2,7 @@
 //! strings, template literals, regex literals, JSX text and Python docstrings are never comments,
 //! so the grammar does the hard work for us.
 use crate::types::{Comment, CommentBlock, CommentKind, Language};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 fn ts_language(lang: Language) -> tree_sitter::Language {
     match lang {
@@ -165,7 +165,7 @@ mod tests {
         assert!(blocks[0].own_line);
         assert_eq!(blocks[1].comments.len(), 1);
         assert!(!blocks[1].own_line);
-        assert!(blocks[1].code_after == false);
+        assert!(!blocks[1].code_after);
     }
 
     #[test]

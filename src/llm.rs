@@ -268,18 +268,26 @@ impl LlmClient {
         // Reply shape: "D3" (delete) or "K1 <line>" (keep). Tolerate a bare DELETE too.
         let (code, rest) = cleaned.split_once(' ').unwrap_or((cleaned.as_str(), ""));
         let code = code.trim_end_matches([':', '.', '-']);
-        let is_class = |c: char| code.len() == 2 && code.starts_with(c) && code.as_bytes()[1].is_ascii_digit();
+        let is_class =
+            |c: char| code.len() == 2 && code.starts_with(c) && code.as_bytes()[1].is_ascii_digit();
         if is_class('D') || code.eq_ignore_ascii_case("delete") {
             return Ok(Verdict::Delete);
         }
-        let cleaned = if is_class('K') { rest.trim().to_string() } else { cleaned };
+        let cleaned = if is_class('K') {
+            rest.trim().to_string()
+        } else {
+            cleaned
+        };
         if cleaned.is_empty() {
             // The model wanted to keep it but could not say what the trap is: delete.
             return Ok(Verdict::Delete);
         }
         let word_count = cleaned.split_whitespace().count();
         if word_count > 2 * max_words {
-            bail!("LLM reply too long: {word_count} words (limit {})", 2 * max_words);
+            bail!(
+                "LLM reply too long: {word_count} words (limit {})",
+                2 * max_words
+            );
         }
         Ok(Verdict::Line(cleaned))
     }
@@ -296,9 +304,16 @@ impl LlmClient {
         let parsed: ChatResponse = resp.json().await.context("failed to parse LLM response")?;
         if let Some(u) = &parsed.usage {
             self.tokens.requests.fetch_add(1, Ordering::Relaxed);
-            self.tokens.prompt.fetch_add(u.prompt_tokens, Ordering::Relaxed);
-            self.tokens.completion.fetch_add(u.completion_tokens, Ordering::Relaxed);
-            let cached = u.prompt_tokens_details.as_ref().map_or(0, |d| d.cached_tokens);
+            self.tokens
+                .prompt
+                .fetch_add(u.prompt_tokens, Ordering::Relaxed);
+            self.tokens
+                .completion
+                .fetch_add(u.completion_tokens, Ordering::Relaxed);
+            let cached = u
+                .prompt_tokens_details
+                .as_ref()
+                .map_or(0, |d| d.cached_tokens);
             self.tokens.cached.fetch_add(cached, Ordering::Relaxed);
         }
         let content = parsed

@@ -34,7 +34,9 @@ fn language(name: &str) -> Result<Language> {
 /// plus the extractive fallback the tool would use if the model fails.
 fn prose_of(comment: &str, lang: Language) -> Result<(String, String)> {
     let comments = parse::extract_comments(comment, lang)?;
-    let first = comments.first().ok_or_else(|| anyhow!("no comment parsed"))?;
+    let first = comments
+        .first()
+        .ok_or_else(|| anyhow!("no comment parsed"))?;
     let last = comments.last().unwrap();
     let block = CommentBlock {
         start: first.start,
@@ -79,7 +81,8 @@ pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
         });
     }
 
-    let (mut n, mut agree, mut exp_del, mut got_del, mut both_del, mut kept_words) = (0, 0, 0, 0, 0, 0);
+    let (mut n, mut agree, mut exp_del, mut got_del, mut both_del, mut kept_words) =
+        (0, 0, 0, 0, 0, 0);
     let mut results = Vec::new();
     while let Some(r) = set.join_next().await {
         match r? {
@@ -104,7 +107,10 @@ pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
             }
         };
         let mark = if e_del == g_del { "ok  " } else { "MISS" };
-        println!("{mark} {:<8} expected: {:<60} got: {got}", row.id, row.output);
+        println!(
+            "{mark} {:<8} expected: {:<60} got: {got}",
+            row.id, row.output
+        );
     }
     let kept = n - got_del;
     println!(

@@ -90,7 +90,10 @@ pub enum Action {
     Delete,
     /// Replace the block with a single-line comment. `prose` is the cleaned comment text to summarize;
     /// `fallback` is the extractive one-liner used when no LLM is available or it fails.
-    Reduce { prose: String, fallback: String },
+    Reduce {
+        prose: String,
+        fallback: String,
+    },
 }
 
 #[derive(Debug, Clone)]

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use commentreducr::{run, Config, Mode};
+use commentreducr::{Config, Mode, run};
 use std::path::PathBuf;
 
 /// Delete or reduce comments in git-tracked Python and JS/TS source files.
@@ -66,11 +66,19 @@ struct Cli {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let cfg = Config {
-        mode: if cli.delete { Mode::Delete } else { Mode::Reduce },
+        mode: if cli.delete {
+            Mode::Delete
+        } else {
+            Mode::Reduce
+        },
         min_lines: cli.min_lines,
         min_density: cli.min_density,
         max_summary_words: cli.max_words,
-        endpoint: if cli.no_llm || cli.delete { None } else { Some(cli.endpoint) },
+        endpoint: if cli.no_llm || cli.delete {
+            None
+        } else {
+            Some(cli.endpoint)
+        },
         model: cli.model,
         api_key: cli.api_key.or_else(|| std::env::var("OPENAI_API_KEY").ok()),
         llm_concurrency: cli.concurrency,

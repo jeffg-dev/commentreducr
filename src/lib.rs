@@ -141,7 +141,11 @@ async fn process_file(
                     llm::Verdict::Delete => {
                         result.deleted += 1;
                         if cfg.dry_run || cfg.verbose {
-                            println!("{}:{line}: delete {} lines (llm)", path.display(), block.line_count());
+                            println!(
+                                "{}:{line}: delete {} lines (llm)",
+                                path.display(),
+                                block.line_count()
+                            );
                         }
                         edits.push(rewrite::delete_edit(&src, block));
                     }
@@ -164,11 +168,11 @@ async fn process_file(
     let new_src = rewrite::apply(&src, edits);
     if new_src != src {
         result.changed = true;
-        if !cfg.dry_run {
-            if let Err(err) = std::fs::write(&path, &new_src) {
-                eprintln!("warning: failed to write {}: {err}", path.display());
-                result.changed = false;
-            }
+        if !cfg.dry_run
+            && let Err(err) = std::fs::write(&path, &new_src)
+        {
+            eprintln!("warning: failed to write {}: {err}", path.display());
+            result.changed = false;
         }
     }
 

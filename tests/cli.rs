@@ -166,7 +166,12 @@ fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
         .assert()
         .success();
     for (f, before) in FIXTURES.iter().zip(before) {
-        assert_eq!(read(dir.path(), f.name), before, "{}: not idempotent", f.name);
+        assert_eq!(
+            read(dir.path(), f.name),
+            before,
+            "{}: not idempotent",
+            f.name
+        );
     }
 }
 
@@ -190,8 +195,16 @@ fn reduce_mode_collapses_big_block_and_is_idempotent() {
         for s in f.survive {
             assert!(updated.contains(s), "{}: lost {:?}", f.name, s);
         }
-        assert!(updated.contains(f.init_comment), "{}: short comment changed", f.name);
-        assert!(updated.contains(f.trailing_remark), "{}: trailing comment changed", f.name);
+        assert!(
+            updated.contains(f.init_comment),
+            "{}: short comment changed",
+            f.name
+        );
+        assert!(
+            updated.contains(f.trailing_remark),
+            "{}: trailing comment changed",
+            f.name
+        );
 
         // The big block collapsed to exactly one `{indent}{prefix} <summary>` line; the file
         // before the block and after it is byte-identical.
@@ -210,7 +223,13 @@ fn reduce_mode_collapses_big_block_and_is_idempotent() {
             middle,
             want_prefix
         );
-        assert_eq!(middle.matches('\n').count(), 1, "{}: middle {:?} not one line", f.name, middle);
+        assert_eq!(
+            middle.matches('\n').count(),
+            1,
+            "{}: middle {:?} not one line",
+            f.name,
+            middle
+        );
         assert!(
             middle.trim_end().len() > want_prefix.len(),
             "{}: summary line empty",
@@ -227,6 +246,11 @@ fn reduce_mode_collapses_big_block_and_is_idempotent() {
         .assert()
         .success();
     for (f, before) in FIXTURES.iter().zip(before) {
-        assert_eq!(read(dir.path(), f.name), before, "{}: not idempotent", f.name);
+        assert_eq!(
+            read(dir.path(), f.name),
+            before,
+            "{}: not idempotent",
+            f.name
+        );
     }
 }

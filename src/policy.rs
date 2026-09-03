@@ -8,7 +8,12 @@ use crate::types::{Action, CommentBlock, Config, Mode};
 /// - Reduce mode: keep trailing/inline comments (not own_line or code_after), keep blocks with
 ///   fewer than `min_lines` prose lines, keep low-density blocks (words_per_line < min_density),
 ///   keep code_like blocks; otherwise Reduce { prose: analysis.text, fallback: analysis.extractive }.
-pub fn decide(block: &CommentBlock, analysis: &ProseAnalysis, structural: bool, cfg: &Config) -> Action {
+pub fn decide(
+    block: &CommentBlock,
+    analysis: &ProseAnalysis,
+    structural: bool,
+    cfg: &Config,
+) -> Action {
     if structural {
         return Action::Keep;
     }
@@ -84,22 +89,34 @@ mod tests {
     fn structural_always_kept() {
         let b = block(true, false);
         let a = analysis(5, 10.0, false);
-        assert!(matches!(decide(&b, &a, true, &cfg(Mode::Delete)), Action::Keep));
-        assert!(matches!(decide(&b, &a, true, &cfg(Mode::Reduce)), Action::Keep));
+        assert!(matches!(
+            decide(&b, &a, true, &cfg(Mode::Delete)),
+            Action::Keep
+        ));
+        assert!(matches!(
+            decide(&b, &a, true, &cfg(Mode::Reduce)),
+            Action::Keep
+        ));
     }
 
     #[test]
     fn delete_mode_deletes_non_structural() {
         let b = block(true, false);
         let a = analysis(5, 10.0, false);
-        assert!(matches!(decide(&b, &a, false, &cfg(Mode::Delete)), Action::Delete));
+        assert!(matches!(
+            decide(&b, &a, false, &cfg(Mode::Delete)),
+            Action::Delete
+        ));
     }
 
     #[test]
     fn reduce_mode_reduces_dense_prose() {
         let b = block(true, false);
         let a = analysis(5, 10.0, false);
-        assert!(matches!(decide(&b, &a, false, &cfg(Mode::Reduce)), Action::Reduce { .. }));
+        assert!(matches!(
+            decide(&b, &a, false, &cfg(Mode::Reduce)),
+            Action::Reduce { .. }
+        ));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/banner.jpg" alt="commentreducr" width="600"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/jeffg-dev/commentreducr/main/assets/banner.jpg" alt="commentreducr" width="600"></p>
 
 # commentreducr
 

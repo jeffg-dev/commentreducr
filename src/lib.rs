@@ -10,10 +10,9 @@ pub mod types;
 
 use anyhow::Result;
 use llm::LlmClient;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use tokio::task::JoinSet;
+use std::panic::AssertUnwindSafe;
+use std::path::Path;
+use std::sync::Mutex;
 pub use types::*;
 
 #[derive(Debug, Default)]
@@ -66,36 +65,28 @@ struct FileResult {
 /// best-effort: a failed LLM call leaves that block unchanged, and a panic while processing a file
 /// (a bug) skips that file. Both are warned about and counted in `Stats`; nothing is written for a
 /// file unless its whole pass succeeded.
-/// Files are processed concurrently on the tokio runtime.
-pub async fn run(root: &Path, cfg: &Config) -> Result<Stats> {
+/// Files are processed on `cfg.llm_concurrency` worker threads.
+pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     let tracked = files::tracked_source_files(root)?;
     let llm = (cfg.mode == Mode::Reduce).then(|| LlmClient::new(cfg));
     if let Some(client) = &llm {
-        client.check().await?;
-    }
-    let llm = Arc::new(llm);
-    let cfg = Arc::new(cfg.clone());
-
-    let mut set = JoinSet::new();
-    let mut paths = HashMap::new();
-    for (path, lang) in tracked.iter().cloned() {
-        let handle = set.spawn(process_file(path.clone(), lang, llm.clone(), cfg.clone()));
-        paths.insert(handle.id(), path);
+        client.check()?;
     }
 
     let mut stats = Stats {
         files_scanned: tracked.len(),
         ..Stats::default()
     };
-    while let Some(res) = set.join_next_with_id().await {
+    let results = parallel(tracked, cfg.llm_concurrency, |(path, lang)| {
+        process_file(path, *lang, llm.as_ref(), cfg)
+    });
+    for ((path, _), res) in results {
         match res {
-            Ok((_, r)) => stats.merge(r),
-            Err(err) => {
-                let path = paths.get(&err.id()).map(|p| p.display().to_string());
+            Ok(r) => stats.merge(r),
+            Err(msg) => {
                 eprintln!(
-                    "warning: skipping {} (internal error: {})",
-                    path.as_deref().unwrap_or("?"),
-                    panic_message(err)
+                    "warning: skipping {} (internal error: {msg})",
+                    path.display()
                 );
                 stats.files_skipped += 1;
             }
@@ -104,21 +95,42 @@ pub async fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     Ok(stats)
 }
 
+/// Run `f` over `items` on `workers` threads. A panic inside `f` is caught and returned as its
+/// message, so one bad item cannot take the run down.
+pub(crate) fn parallel<T: Send, R: Send>(
+    items: Vec<T>,
+    workers: usize,
+    f: impl Fn(&T) -> R + Sync,
+) -> Vec<(T, Result<R, String>)> {
+    let queue = Mutex::new(items.into_iter());
+    let out = Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for _ in 0..workers.max(1) {
+            s.spawn(|| {
+                loop {
+                    let Some(item) = queue.lock().unwrap().next() else {
+                        break;
+                    };
+                    let r = std::panic::catch_unwind(AssertUnwindSafe(|| f(&item)))
+                        .map_err(panic_message);
+                    out.lock().unwrap().push((item, r));
+                }
+            });
+        }
+    });
+    out.into_inner().unwrap()
+}
+
 /// Read, analyze and (if anything changed) rewrite one file. Recoverable failures (unreadable /
 /// non-UTF-8 file, a parser error) are reported with a warning and the file is skipped; a failed
 /// LLM call leaves that block unchanged.
-async fn process_file(
-    path: PathBuf,
-    lang: Language,
-    llm: Arc<Option<LlmClient>>,
-    cfg: Arc<Config>,
-) -> FileResult {
+fn process_file(path: &Path, lang: Language, llm: Option<&LlmClient>, cfg: &Config) -> FileResult {
     let mut result = FileResult {
         skipped: true,
         ..FileResult::default()
     };
 
-    let src = match std::fs::read_to_string(&path) {
+    let src = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(err) => {
             eprintln!("warning: skipping {} (unreadable: {err})", path.display());
@@ -141,7 +153,7 @@ async fn process_file(
     for block in &blocks {
         let analysis = prose::analyze(block, lang);
         let structural = structural::is_structural(block, lang, &src);
-        let action = policy::decide(block, &analysis, structural, &cfg);
+        let action = policy::decide(block, &analysis, structural, cfg);
 
         match action {
             Action::Keep => result.kept += 1,
@@ -160,11 +172,8 @@ async fn process_file(
             Action::Reduce { prose } => {
                 let context = first_nonblank_after(&lines, block.end_line);
                 let line = block.start_line + 1;
-                let client = llm.as_ref().as_ref().expect("reduce mode has an LLM");
-                let verdict = match client
-                    .summarize(&prose, &context, cfg.max_summary_words)
-                    .await
-                {
+                let client = llm.expect("reduce mode has an LLM");
+                let verdict = match client.summarize(&prose, &context, cfg.max_summary_words) {
                     Ok(v) => v,
                     Err(err) => {
                         eprintln!(
@@ -208,7 +217,7 @@ async fn process_file(
     if new_src != src {
         result.changed = true;
         if !cfg.dry_run
-            && let Err(err) = std::fs::write(&path, &new_src)
+            && let Err(err) = std::fs::write(path, &new_src)
         {
             eprintln!("warning: failed to write {}: {err}", path.display());
             result.changed = false;
@@ -218,12 +227,8 @@ async fn process_file(
     result
 }
 
-/// Best-effort text of a task panic.
-fn panic_message(err: tokio::task::JoinError) -> String {
-    if !err.is_panic() {
-        return err.to_string();
-    }
-    let payload = err.into_panic();
+/// Best-effort text of a panic payload.
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&str>() {
         (*s).to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {

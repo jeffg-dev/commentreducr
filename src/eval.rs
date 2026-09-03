@@ -6,9 +6,7 @@ use crate::{parse, prose};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tokio::task::JoinSet;
 
 #[derive(Deserialize, Clone)]
 struct Row {
@@ -51,36 +49,30 @@ fn prose_of(comment: &str, lang: Language) -> Result<String> {
     Ok(prose::analyze(&block, lang).text)
 }
 
-pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
+pub fn run(dataset: &Path, cfg: &Config) -> Result<()> {
     let text = std::fs::read_to_string(dataset).context("reading dataset")?;
     let rows: Vec<Row> = text
         .lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str(l).context("bad dataset row"))
         .collect::<Result<_>>()?;
-    let llm = Arc::new(LlmClient::new(cfg));
+    let llm = LlmClient::new(cfg);
     let max_words = cfg.max_summary_words;
 
-    let mut set = JoinSet::new();
-    for row in rows {
-        let llm = llm.clone();
-        set.spawn(async move {
-            let lang = language(&row.language)?;
-            let p = prose_of(&row.comment, lang)?;
-            let v = llm
-                .summarize(&p, &row.context, max_words)
-                .await
-                .with_context(|| format!("{}: model failed", row.id))?;
-            Ok::<_, anyhow::Error>((row, v))
-        });
+    let outcomes = crate::parallel(rows, cfg.llm_concurrency, |row| -> Result<Verdict> {
+        let lang = language(&row.language)?;
+        let p = prose_of(&row.comment, lang)?;
+        llm.summarize(&p, &row.context, max_words)
+            .with_context(|| format!("{}: model failed", row.id))
+    });
+    let mut results = Vec::new();
+    for (row, r) in outcomes {
+        let v = r.map_err(|m| anyhow!("{}: {m}", row.id))??;
+        results.push((row, v));
     }
 
     let (mut n, mut agree, mut exp_del, mut got_del, mut both_del, mut kept_words) =
         (0, 0, 0, 0, 0, 0);
-    let mut results = Vec::new();
-    while let Some(r) = set.join_next().await {
-        results.push(r??);
-    }
     results.sort_by(|a, b| a.0.id.cmp(&b.0.id));
     for (row, v) in &results {
         n += 1;

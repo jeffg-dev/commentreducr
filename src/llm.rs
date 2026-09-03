@@ -6,8 +6,6 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
-use tokio::sync::Semaphore;
 
 /// What the model decided about a comment block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,11 +150,9 @@ fn user_message(prose: &str, context: &str) -> String {
 }
 
 pub struct LlmClient {
-    client: reqwest::Client,
     endpoint: String,
     model: String,
     api_key: Option<String>,
-    semaphore: Semaphore,
     pub tokens: TokenTotals,
 }
 
@@ -204,30 +200,23 @@ struct ChatMessage {
 
 impl LlmClient {
     pub fn new(cfg: &Config) -> LlmClient {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
-            .build()
-            .expect("failed to build reqwest client");
         let endpoint = cfg.endpoint.trim_end_matches('/').to_string();
         LlmClient {
-            client,
             endpoint,
             model: cfg.model.clone(),
             api_key: cfg.api_key.clone(),
-            semaphore: Semaphore::new(cfg.llm_concurrency.max(1)),
             tokens: TokenTotals::default(),
         }
     }
 
     /// Preflight: one tiny completion to prove the endpoint is reachable and the model loads.
-    pub async fn check(&self) -> Result<()> {
+    pub fn check(&self) -> Result<()> {
         let body = json!({
             "model": self.model,
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 1,
         });
         self.post(&format!("{}/chat/completions", self.endpoint), &body)
-            .await
             .with_context(|| {
                 format!(
                     "cannot reach LLM at {} with model {} (--reduce needs it)",
@@ -240,13 +229,7 @@ impl LlmClient {
     /// Ask the model what to do with a comment block. `prose` is the cleaned comment text and
     /// `context` the first non-blank code line after it (may be empty). Returns Err on transport
     /// failure or unusable output.
-    pub async fn summarize(&self, prose: &str, context: &str, max_words: usize) -> Result<Verdict> {
-        let _permit = self
-            .semaphore
-            .acquire()
-            .await
-            .map_err(|e| anyhow!("semaphore closed: {e}"))?;
-
+    pub fn summarize(&self, prose: &str, context: &str, max_words: usize) -> Result<Verdict> {
         let mut messages = vec![json!({
             "role": "system",
             "content": SYSTEM_PROMPT.replace("{max_words}", &max_words.to_string()),
@@ -266,9 +249,9 @@ impl LlmClient {
 
         let url = format!("{}/chat/completions", self.endpoint);
 
-        let raw = match self.post(&url, &body).await {
+        let raw = match self.post(&url, &body) {
             Ok(r) => r,
-            Err(_) => self.post(&url, &body).await?, // one retry on transport error
+            Err(_) => self.post(&url, &body)?, // one retry on transport error
         };
 
         let cleaned = clean_reply(&raw);
@@ -305,16 +288,23 @@ impl LlmClient {
         Ok(Verdict::Line(cleaned))
     }
 
-    async fn post(&self, url: &str, body: &serde_json::Value) -> Result<String> {
-        let mut req = self.client.post(url).json(body);
+    fn post(&self, url: &str, body: &serde_json::Value) -> Result<String> {
+        let mut req = minreq::post(url)
+            .with_timeout(60)
+            .with_json(body)
+            .context("encoding LLM request")?;
         if let Some(key) = &self.api_key {
-            req = req.bearer_auth(key);
+            req = req.with_header("Authorization", format!("Bearer {key}"));
         }
-        let resp = req.send().await.context("LLM request failed")?;
-        let resp = resp
-            .error_for_status()
-            .context("LLM returned an error status")?;
-        let parsed: ChatResponse = resp.json().await.context("failed to parse LLM response")?;
+        let resp = req.send().context("LLM request failed")?;
+        if !(200..300).contains(&resp.status_code) {
+            bail!(
+                "LLM returned HTTP {} {}",
+                resp.status_code,
+                resp.reason_phrase
+            );
+        }
+        let parsed: ChatResponse = resp.json().context("failed to parse LLM response")?;
         if let Some(u) = &parsed.usage {
             self.tokens.requests.fetch_add(1, Ordering::Relaxed);
             self.tokens

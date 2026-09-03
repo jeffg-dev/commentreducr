@@ -1,0 +1,24 @@
+[package]
+name = "commentreducr"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive"] }
+regex = "1.13.1"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+rust-stemmers = "1.2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "fs", "time"] }
+tree-sitter = "0.27.0"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-typescript = "0.23.2"
+unicode-segmentation = "1.13.3"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+predicates = "3.1.4"
+tempfile = "3.27.0"

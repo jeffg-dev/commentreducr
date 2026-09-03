@@ -124,6 +124,31 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     Ok(stats)
 }
 
+/// Parse every tracked source file under `root` and print a redacted report (see
+/// `parse::diagnose`) of each one with parse errors to stdout, numbered; the path each number
+/// stands for goes to stderr so the stdout report can be pasted into a bug report as is.
+/// No LLM, no writes. Returns the number of files with parse errors.
+pub fn diagnose(root: &Path) -> Result<usize> {
+    let mut bad = 0;
+    for (path, lang) in files::tracked_source_files(root)? {
+        let src = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("warning: skipping {} (unreadable: {e})", path.display());
+                continue;
+            }
+        };
+        if let Some(report) =
+            parse::diagnose(&src, lang).map_err(|e| e.context(path.display().to_string()))?
+        {
+            bad += 1;
+            eprintln!("file {bad}: {}", path.display());
+            println!("### file {bad}: {report}");
+        }
+    }
+    Ok(bad)
+}
+
 /// Run `f` over `items` on `workers` threads. A panic inside `f` is caught and returned as its
 /// message, so one bad item cannot take the run down.
 pub(crate) fn parallel<T: Send, R: Send>(

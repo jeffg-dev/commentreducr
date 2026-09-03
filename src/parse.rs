@@ -71,13 +71,17 @@ fn make_comment(src: &str, node: &tree_sitter::Node) -> Comment {
     }
 }
 
-/// All comment tokens in `src`, in source order.
-pub fn extract_comments(src: &str, lang: Language) -> Result<Vec<Comment>> {
+fn parse_tree(src: &str, lang: Language) -> Result<tree_sitter::Tree> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&ts_language(lang))?;
-    let tree = parser
+    parser
         .parse(src, None)
-        .ok_or_else(|| anyhow!("tree-sitter failed to parse"))?;
+        .ok_or_else(|| anyhow!("tree-sitter failed to parse"))
+}
+
+/// All comment tokens in `src`, in source order.
+pub fn extract_comments(src: &str, lang: Language) -> Result<Vec<Comment>> {
+    let tree = parse_tree(src, lang)?;
     // tree-sitter's error recovery can mislex strings/regexes when it can't make sense of the
     // input; never touch a file we didn't parse cleanly.
     if tree.root_node().has_error() {
@@ -101,6 +105,81 @@ pub fn extract_comments(src: &str, lang: Language) -> Result<Vec<Comment>> {
             if !cursor.goto_parent() {
                 return Ok(comments);
             }
+        }
+    }
+}
+
+/// Redacted description of every parse error in `src`, or None if the file parses cleanly.
+/// Only node kinds, positions and the shape of the offending lines (letters -> `a`, digits -> `0`,
+/// non-ASCII -> `~`) are included, so the output is safe to paste into a bug report.
+pub fn diagnose(src: &str, lang: Language) -> Result<Option<String>> {
+    const MAX_ERRORS: usize = 20;
+    const MAX_LINES: usize = 5;
+    const MAX_COLS: usize = 200;
+    let tree = parse_tree(src, lang)?;
+    if !tree.root_node().has_error() {
+        return Ok(None);
+    }
+    let mut errors = Vec::new();
+    collect_errors(tree.root_node(), &mut errors);
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = format!(
+        "{lang:?}, {} lines, {} parse errors\n",
+        lines.len(),
+        errors.len()
+    );
+    for node in errors.iter().take(MAX_ERRORS) {
+        let (s, e) = (node.start_position(), node.end_position());
+        let mut chain = Vec::new();
+        let mut p = node.parent();
+        while let Some(n) = p {
+            chain.push(n.kind());
+            p = n.parent();
+        }
+        chain.reverse();
+        out.push_str(&format!(
+            "{}:{}-{}:{} in {}\n  {}\n",
+            s.row + 1,
+            s.column + 1,
+            e.row + 1,
+            e.column + 1,
+            chain.join(" > "),
+            node.to_sexp()
+        ));
+        for line in lines
+            .iter()
+            .skip(s.row)
+            .take((e.row - s.row + 1).min(MAX_LINES))
+        {
+            let masked: String = line
+                .chars()
+                .take(MAX_COLS)
+                .map(|c| match c {
+                    c if c.is_ascii_alphabetic() => 'a',
+                    c if c.is_ascii_digit() => '0',
+                    c if c.is_ascii() => c,
+                    _ => '~',
+                })
+                .collect();
+            out.push_str(&format!("  | {masked}\n"));
+        }
+    }
+    if errors.len() > MAX_ERRORS {
+        out.push_str(&format!("... {} more\n", errors.len() - MAX_ERRORS));
+    }
+    Ok(Some(out))
+}
+
+/// Outermost ERROR / MISSING nodes under `node`, in source order.
+fn collect_errors<'a>(node: tree_sitter::Node<'a>, out: &mut Vec<tree_sitter::Node<'a>>) {
+    if node.is_error() || node.is_missing() {
+        out.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.has_error() {
+            collect_errors(child, out);
         }
     }
 }
@@ -189,6 +268,21 @@ mod tests {
         assert_eq!(blocks[0].comments.len(), 1);
         assert!(blocks[1].own_line);
         assert_eq!(blocks[1].comments.len(), 1);
+    }
+
+    #[test]
+    fn diagnose_redacts_source() {
+        assert!(diagnose("x = 1\n", Language::Python).unwrap().is_none());
+        let src = "def f(:\n    secret = \"hunter2\"\n";
+        let report = diagnose(src, Language::Python).unwrap().unwrap();
+        assert!(
+            report.contains("ERROR") || report.contains("MISSING"),
+            "{report}"
+        );
+        assert!(
+            !report.contains("secret") && !report.contains("hunter2"),
+            "{report}"
+        );
     }
 
     #[test]

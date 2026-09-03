@@ -23,19 +23,28 @@ struct Cli {
     #[arg(long)]
     delete: bool,
 
-    /// OpenAI-compatible base URL (e.g. http://localhost:8000/v1).
-    #[arg(long, default_value = "http://localhost:8000/v1")]
+    /// OpenAI-compatible base URL for --reduce.
+    #[arg(
+        long,
+        env = "COMMENTREDUCR_ENDPOINT",
+        default_value = "http://localhost:8000/v1"
+    )]
     endpoint: String,
 
     /// Disable the LLM; use extractive summaries only.
     #[arg(long)]
     no_llm: bool,
 
-    #[arg(long, default_value = "gemma-4-e2b-it-4bit")]
+    /// Model name sent to the endpoint. The prompt is tuned for Gemma 4 E2B.
+    #[arg(
+        long,
+        env = "COMMENTREDUCR_MODEL",
+        default_value = "gemma-4-e2b-it-4bit"
+    )]
     model: String,
 
-    /// API key (also read from OPENAI_API_KEY).
-    #[arg(long)]
+    /// API key, if the endpoint needs one (falls back to OPENAI_API_KEY).
+    #[arg(long, env = "COMMENTREDUCR_API_KEY", hide_env_values = true)]
     api_key: Option<String>,
 
     /// Max in-flight LLM requests.

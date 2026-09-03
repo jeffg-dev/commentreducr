@@ -3,6 +3,12 @@ name = "commentreducr"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+description = "Strip low-value comments from a JS/TS/Python codebase, keeping structural ones"
+repository = "https://github.com/jeffg-dev/commentreducr"
+readme = "README.md"
+keywords = ["comments", "cli", "tree-sitter", "refactoring"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["tools/", "DESIGN.md"]
 
 [dependencies]
 anyhow = "1.0.104"

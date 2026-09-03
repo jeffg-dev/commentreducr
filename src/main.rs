@@ -42,7 +42,7 @@ struct Cli {
     #[arg(long)]
     api_key: Option<String>,
 
-    /// Max in-flight LLM requests.
+    /// Worker threads (also the max in-flight LLM requests).
     #[arg(long, default_value_t = 8)]
     concurrency: usize,
 
@@ -91,9 +91,10 @@ fn load_file_config(path: &Path) -> Result<FileConfig> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
+    // Panics inside a worker are caught and reported as warnings; keep the default hook quiet.
+    std::panic::set_hook(Box::new(|_| {}));
     let file = load_file_config(&cli.config)?;
     let cfg = Config {
         mode: if cli.delete {
@@ -118,9 +119,9 @@ async fn main() -> Result<()> {
         verbose: cli.verbose,
     };
     if let Some(dataset) = &cli.eval {
-        return commentreducr::eval::run(dataset, &cfg).await;
+        return commentreducr::eval::run(dataset, &cfg);
     }
-    let stats = run(cli.path.as_deref().unwrap(), &cfg).await?;
+    let stats = run(cli.path.as_deref().unwrap(), &cfg)?;
     eprintln!(
         "{} files scanned, {} changed, {} skipped; comments: {} kept, {} deleted, {} reduced, {} LLM failures",
         stats.files_scanned,

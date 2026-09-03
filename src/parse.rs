@@ -3,6 +3,9 @@
 //! so the grammar does the hard work for us.
 use crate::types::{Comment, CommentBlock, CommentKind, Language};
 use anyhow::{Result, anyhow};
+use regex::Regex;
+use std::borrow::Cow;
+use std::sync::LazyLock;
 
 fn ts_language(lang: Language) -> tree_sitter::Language {
     match lang {
@@ -71,11 +74,35 @@ fn make_comment(src: &str, node: &tree_sitter::Node) -> Comment {
     }
 }
 
+static TYPEOF_IMPORT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(typeof\s+)import(\s*\()").unwrap());
+
+/// The text tree-sitter actually sees: `src` with a couple of byte-length-preserving edits that
+/// work around grammar limitations, so node offsets still index `src` directly.
+///
+/// - A raw NUL byte (legal inside a JS/TS string) is a hard lexer error; parse it as a space.
+/// - `f<typeof import('m')>()` (the Vitest `importOriginal` idiom) fails in tree-sitter-typescript
+///   0.23 (tree-sitter/tree-sitter-typescript#367): the parser commits to `f < typeof ...`.
+///   `typeof IMPORT(...)` parses as a type query in every position, and in expression position an
+///   identifier call has the same shape as a dynamic import, so the swap changes nothing else.
+fn parse_input(src: &str, lang: Language) -> Cow<'_, str> {
+    let mut text = Cow::Borrowed(src);
+    if text.contains('\0') {
+        text = Cow::Owned(text.replace('\0', " "));
+    }
+    if matches!(lang, Language::TypeScript | Language::Tsx)
+        && let Cow::Owned(s) = TYPEOF_IMPORT_RE.replace_all(&text, "${1}IMPORT${2}")
+    {
+        text = Cow::Owned(s);
+    }
+    text
+}
+
 fn parse_tree(src: &str, lang: Language) -> Result<tree_sitter::Tree> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&ts_language(lang))?;
     parser
-        .parse(src, None)
+        .parse(parse_input(src, lang).as_bytes(), None)
         .ok_or_else(|| anyhow!("tree-sitter failed to parse"))
 }
 
@@ -111,7 +138,8 @@ pub fn extract_comments(src: &str, lang: Language) -> Result<Vec<Comment>> {
 
 /// Redacted description of every parse error in `src`, or None if the file parses cleanly.
 /// Only node kinds, positions and the shape of the offending lines (letters -> `a`, digits -> `0`,
-/// non-ASCII -> `~`) are included, so the output is safe to paste into a bug report.
+/// control chars -> `^`, non-ASCII -> `~`) are included, so the output is safe to paste into a
+/// bug report.
 pub fn diagnose(src: &str, lang: Language) -> Result<Option<String>> {
     const MAX_ERRORS: usize = 20;
     const MAX_LINES: usize = 5;
@@ -157,6 +185,7 @@ pub fn diagnose(src: &str, lang: Language) -> Result<Option<String>> {
                 .map(|c| match c {
                     c if c.is_ascii_alphabetic() => 'a',
                     c if c.is_ascii_digit() => '0',
+                    c if c.is_ascii_control() && c != '\t' => '^',
                     c if c.is_ascii() => c,
                     _ => '~',
                 })
@@ -283,6 +312,23 @@ mod tests {
             !report.contains("secret") && !report.contains("hunter2"),
             "{report}"
         );
+    }
+
+    #[test]
+    fn grammar_workarounds_keep_offsets() {
+        // tree-sitter/tree-sitter-typescript#367 plus a raw NUL inside a string; both must parse,
+        // and comment text must come from the original source.
+        let src = "vi.mock('./m', async (importOriginal) => {\n  // keep: typeof import('x')\n  const actual = await importOriginal<typeof import('./m')>();\n  return [actual].join(\"\0\"); // trailing\n});\n";
+        assert!(diagnose(src, Language::TypeScript).unwrap().is_none());
+        let comments = extract_comments(src, Language::TypeScript).unwrap();
+        let texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(texts, vec!["// keep: typeof import('x')", "// trailing"]);
+        assert_eq!(&src[comments[1].start..comments[1].end], "// trailing");
+
+        let report = diagnose("const x = \"\0\";\nlet = ;\n", Language::TypeScript)
+            .unwrap()
+            .unwrap();
+        assert!(!report.contains('\0'), "{report}");
     }
 
     #[test]

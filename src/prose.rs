@@ -1,8 +1,6 @@
 //! Lightweight NLP over comment text: strip delimiters, drop separators / commented-out code,
-//! unwrap paragraphs, split sentences, measure density, and produce an extractive one-liner.
+//! unwrap paragraphs, split sentences, measure density.
 use crate::types::{CommentBlock, CommentKind, Language};
-use rust_stemmers::{Algorithm, Stemmer};
-use std::collections::{HashMap, HashSet};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
@@ -17,20 +15,7 @@ pub struct ProseAnalysis {
     pub words_per_line: f64,
     /// Most of the raw lines look like commented-out code rather than English.
     pub code_like: bool,
-    /// Best single-sentence extractive summary, trimmed to roughly `max_words`.
-    pub extractive: String,
 }
-
-const STOPWORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "but", "if", "then", "else", "when", "at", "by", "for", "with",
-    "about", "against", "between", "into", "through", "during", "before", "after", "above",
-    "below", "to", "from", "up", "down", "in", "out", "on", "off", "over", "under", "again",
-    "further", "once", "here", "there", "all", "any", "both", "each", "few", "more", "most",
-    "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so", "than", "too",
-    "very", "can", "will", "just", "should", "now", "is", "are", "was", "were", "be", "been",
-    "being", "have", "has", "had", "do", "does", "did", "this", "that", "these", "those", "of",
-    "it", "its", "as", "which", "who", "what",
-];
 
 /// Strip comment delimiters/leaders from each raw line of the block: `#`, `//`, `/*`, `*/`,
 /// leading `*` in block comments, and surrounding whitespace.
@@ -118,64 +103,7 @@ fn is_code_like(line: &str) -> bool {
     total > 0 && (punct as f64 / total as f64) > 0.35
 }
 
-fn truncate_words(s: &str, max_words: usize) -> String {
-    let words: Vec<&str> = s.split_whitespace().collect();
-    if words.len() <= max_words {
-        words.join(" ")
-    } else {
-        words[..max_words].join(" ")
-    }
-}
-
-fn tokenize(sentence: &str, stemmer: &Stemmer) -> Vec<String> {
-    sentence
-        .split(|c: char| !c.is_alphabetic())
-        .filter(|w| !w.is_empty())
-        .map(|w| w.to_lowercase())
-        .filter(|w| !STOPWORDS.contains(&w.as_str()))
-        .map(|w| stemmer.stem(&w).into_owned())
-        .collect()
-}
-
-fn extractive_summary(sentences: &[String], prose_lines: &[String], max_words: usize) -> String {
-    if sentences.is_empty() {
-        return match prose_lines.first() {
-            Some(l) => truncate_words(l, max_words),
-            None => String::new(),
-        };
-    }
-    if sentences[0].split_whitespace().count() <= max_words {
-        return sentences[0].clone();
-    }
-
-    let stemmer = Stemmer::create(Algorithm::English);
-    let tokenized: Vec<Vec<String>> = sentences.iter().map(|s| tokenize(s, &stemmer)).collect();
-
-    let mut df: HashMap<&str, usize> = HashMap::new();
-    for toks in &tokenized {
-        let seen: HashSet<&str> = toks.iter().map(|t| t.as_str()).collect();
-        for t in seen {
-            *df.entry(t).or_insert(0) += 1;
-        }
-    }
-
-    let mut best_idx = 0usize;
-    let mut best_score = f64::MIN;
-    for (i, toks) in tokenized.iter().enumerate() {
-        if toks.is_empty() {
-            continue;
-        }
-        let sum: usize = toks.iter().map(|t| df[t.as_str()]).sum();
-        let score = sum as f64 / (toks.len() as f64).sqrt();
-        if score > best_score {
-            best_score = score;
-            best_idx = i;
-        }
-    }
-    truncate_words(&sentences[best_idx], max_words)
-}
-
-pub fn analyze(block: &CommentBlock, lang: Language, max_words: usize) -> ProseAnalysis {
+pub fn analyze(block: &CommentBlock, lang: Language) -> ProseAnalysis {
     let raw = clean_lines(block, lang);
 
     let mut code_line_count = 0usize;
@@ -207,7 +135,6 @@ pub fn analyze(block: &CommentBlock, lang: Language, max_words: usize) -> ProseA
     } else {
         word_count as f64 / prose_lines.len() as f64
     };
-    let extractive = extractive_summary(&sentences, &prose_lines, max_words);
 
     ProseAnalysis {
         lines: prose_lines,
@@ -216,7 +143,6 @@ pub fn analyze(block: &CommentBlock, lang: Language, max_words: usize) -> ProseA
         word_count,
         words_per_line,
         code_like,
-        extractive,
     }
 }
 
@@ -260,13 +186,5 @@ mod tests {
             lines,
             vec!["hello world".to_string(), "doc line".to_string()]
         );
-    }
-
-    #[test]
-    fn short_first_sentence_used_verbatim() {
-        let block =
-            line_block(&["This explains the thing. And here is more detail to pad it out."]);
-        let a = analyze(&block, Language::JavaScript, 10);
-        assert_eq!(a.extractive, "This explains the thing.");
     }
 }

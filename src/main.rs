@@ -34,10 +34,6 @@ struct Cli {
     #[arg(long)]
     endpoint: Option<String>,
 
-    /// Disable the LLM; use extractive summaries only.
-    #[arg(long)]
-    no_llm: bool,
-
     /// Model name; the prompt is tuned for Gemma 4 E2B [default: gemma-4-e2b-it-4bit].
     #[arg(long)]
     model: Option<String>,
@@ -62,8 +58,8 @@ struct Cli {
     #[arg(long, default_value_t = 20)]
     max_words: usize,
 
-    /// Report what would change without writing.
-    #[arg(long)]
+    /// With --delete only: count what would change without writing.
+    #[arg(long, requires = "delete")]
     dry_run: bool,
 
     #[arg(short, long)]
@@ -99,10 +95,6 @@ fn load_file_config(path: &Path) -> Result<FileConfig> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let file = load_file_config(&cli.config)?;
-    let endpoint = cli
-        .endpoint
-        .or(file.endpoint)
-        .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
     let cfg = Config {
         mode: if cli.delete {
             Mode::Delete
@@ -112,11 +104,10 @@ async fn main() -> Result<()> {
         min_lines: cli.min_lines,
         min_density: cli.min_density,
         max_summary_words: cli.max_words,
-        endpoint: if cli.no_llm || cli.delete {
-            None
-        } else {
-            Some(endpoint)
-        },
+        endpoint: cli
+            .endpoint
+            .or(file.endpoint)
+            .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string()),
         model: cli
             .model
             .or(file.model)
@@ -131,13 +122,12 @@ async fn main() -> Result<()> {
     }
     let stats = run(cli.path.as_deref().unwrap(), &cfg).await?;
     eprintln!(
-        "{} files scanned, {} changed; comments: {} kept, {} deleted, {} reduced ({} extractive fallbacks)",
+        "{} files scanned, {} changed; comments: {} kept, {} deleted, {} reduced",
         stats.files_scanned,
         stats.files_changed,
         stats.comments_kept,
         stats.comments_deleted,
         stats.comments_reduced,
-        stats.llm_fallbacks
     );
     Ok(())
 }

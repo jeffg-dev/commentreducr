@@ -1,14 +1,11 @@
-//! End-to-end CLI test over tests/fixtures: --delete and --no-llm (reduce), each checked for
-//! correctness and idempotency, without touching the live LLM.
+//! End-to-end CLI tests over tests/fixtures without a live LLM: --delete (correct and idempotent),
+//! --delete --dry-run (counts, writes nothing), and --reduce against a dead endpoint (hard failure,
+//! writes nothing).
 use assert_cmd::Command;
 use std::path::Path;
 
 struct Fixture {
     name: &'static str,
-    prefix: &'static str,
-    block_start_anchor: &'static str,
-    block_end_anchor: &'static str,
-    indent: &'static str,
     init_comment: &'static str,
     trailing_remark: &'static str,
     /// Text that must survive both modes byte-for-byte: strings, docstring/JSDoc, license, directives.
@@ -18,10 +15,6 @@ struct Fixture {
 const FIXTURES: &[Fixture] = &[
     Fixture {
         name: "sample.py",
-        prefix: "#",
-        block_start_anchor: "    # This function walks",
-        block_end_anchor: "    count = 0\n",
-        indent: "    ",
         init_comment: "# init",
         trailing_remark: "# trailing remark about the return shape",
         survive: &[
@@ -34,10 +27,6 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         name: "sample.js",
-        prefix: "//",
-        block_start_anchor: "    // This function walks",
-        block_end_anchor: "    let count = 0;\n",
-        indent: "    ",
         init_comment: "// init",
         trailing_remark: "// trailing remark about the divisor",
         survive: &[
@@ -51,10 +40,6 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         name: "sample.ts",
-        prefix: "//",
-        block_start_anchor: "    // This function walks",
-        block_end_anchor: "    let count = 0;\n",
-        indent: "    ",
         init_comment: "// init",
         trailing_remark: "// trailing remark about the divisor",
         survive: &[
@@ -69,10 +54,6 @@ const FIXTURES: &[Fixture] = &[
     },
     Fixture {
         name: "sample.tsx",
-        prefix: "//",
-        block_start_anchor: "    // This function walks",
-        block_end_anchor: "    let count = 0;\n",
-        indent: "    ",
         init_comment: "// init",
         trailing_remark: "// trailing remark about the divisor",
         survive: &[
@@ -175,82 +156,58 @@ fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
     }
 }
 
+fn snapshot(dir: &Path) -> Vec<String> {
+    FIXTURES.iter().map(|f| read(dir, f.name)).collect()
+}
+
 #[test]
-fn reduce_mode_collapses_big_block_and_is_idempotent() {
+fn delete_dry_run_counts_but_writes_nothing() {
     let dir = setup_repo();
-    let originals: Vec<String> = FIXTURES.iter().map(|f| read(dir.path(), f.name)).collect();
+    let before = snapshot(dir.path());
 
     Command::cargo_bin("commentreducr")
         .unwrap()
         .arg(dir.path())
-        .arg("--no-llm")
+        .arg("--delete")
+        .arg("--dry-run")
         .assert()
-        .success();
+        .success()
+        .stdout(predicates::str::contains(": delete "))
+        .stderr(predicates::str::contains("4 files scanned, 4 changed"));
 
-    for (f, original) in FIXTURES.iter().zip(&originals) {
-        let updated = read(dir.path(), f.name);
+    assert_eq!(snapshot(dir.path()), before, "dry run modified files");
+}
 
-        // Everything outside the big block is untouched: strings, docstring/JSDoc, license,
-        // directives, the short comment and the trailing comment all survive verbatim.
-        for s in f.survive {
-            assert!(updated.contains(s), "{}: lost {:?}", f.name, s);
-        }
-        assert!(
-            updated.contains(f.init_comment),
-            "{}: short comment changed",
-            f.name
-        );
-        assert!(
-            updated.contains(f.trailing_remark),
-            "{}: trailing comment changed",
-            f.name
-        );
-
-        // The big block collapsed to exactly one `{indent}{prefix} <summary>` line; the file
-        // before the block and after it is byte-identical.
-        let start = original.find(f.block_start_anchor).unwrap();
-        let end = original.find(f.block_end_anchor).unwrap();
-        let before = &original[..start];
-        let after = &original[end..];
-        assert!(updated.starts_with(before), "{}: prefix changed", f.name);
-        assert!(updated.ends_with(after), "{}: suffix changed", f.name);
-        let middle = &updated[before.len()..updated.len() - after.len()];
-        let want_prefix = format!("{}{} ", f.indent, f.prefix);
-        assert!(
-            middle.starts_with(&want_prefix),
-            "{}: middle {:?} missing prefix {:?}",
-            f.name,
-            middle,
-            want_prefix
-        );
-        assert_eq!(
-            middle.matches('\n').count(),
-            1,
-            "{}: middle {:?} not one line",
-            f.name,
-            middle
-        );
-        assert!(
-            middle.trim_end().len() > want_prefix.len(),
-            "{}: summary line empty",
-            f.name
-        );
-    }
-
-    // Idempotent: the reduced block is short, so a second pass makes no further change.
-    let before: Vec<String> = FIXTURES.iter().map(|f| read(dir.path(), f.name)).collect();
+#[test]
+fn dry_run_requires_delete() {
+    let dir = setup_repo();
     Command::cargo_bin("commentreducr")
         .unwrap()
         .arg(dir.path())
-        .arg("--no-llm")
+        .arg("--dry-run")
         .assert()
-        .success();
-    for (f, before) in FIXTURES.iter().zip(before) {
-        assert_eq!(
-            read(dir.path(), f.name),
-            before,
-            "{}: not idempotent",
-            f.name
-        );
-    }
+        .failure()
+        .stderr(predicates::str::contains("--delete"));
+}
+
+#[test]
+fn reduce_fails_hard_when_llm_unreachable() {
+    let dir = setup_repo();
+    let before = snapshot(dir.path());
+
+    Command::cargo_bin("commentreducr")
+        .unwrap()
+        .arg(dir.path())
+        .arg("--reduce")
+        .arg("--config")
+        .arg(dir.path().join("no-such-config.toml"))
+        .arg("--endpoint")
+        .arg("http://127.0.0.1:1/v1")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "cannot reach LLM at http://127.0.0.1:1/v1",
+        ));
+
+    assert_eq!(snapshot(dir.path()), before, "failed reduce modified files");
 }

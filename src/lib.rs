@@ -8,7 +8,7 @@ pub mod rewrite;
 pub mod structural;
 pub mod types;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use llm::LlmClient;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,7 +22,6 @@ pub struct Stats {
     pub comments_kept: usize,
     pub comments_deleted: usize,
     pub comments_reduced: usize,
-    pub llm_fallbacks: usize,
 }
 
 impl Stats {
@@ -33,7 +32,6 @@ impl Stats {
         self.comments_kept += r.kept;
         self.comments_deleted += r.deleted;
         self.comments_reduced += r.reduced;
-        self.llm_fallbacks += r.llm_fallbacks;
     }
 }
 
@@ -44,18 +42,22 @@ struct FileResult {
     kept: usize,
     deleted: usize,
     reduced: usize,
-    llm_fallbacks: usize,
 }
 
 /// Process every tracked source file under `root`.
 /// Per file: read (skip non-UTF-8 with a warning), extract_comments -> group_blocks, for each block
-/// analyze + is_structural + decide; Reduce actions call the LLM (if configured) with bounded
-/// concurrency, falling back to the extractive summary on error; build edits; rewrite::apply;
-/// write back only if changed (unless dry_run, in which case print a per-file summary of changes).
+/// analyze + is_structural + decide; Reduce actions call the LLM with bounded concurrency and any
+/// LLM failure aborts the whole run; build edits; rewrite::apply; write back only if changed
+/// (unless dry_run, in which case print a per-file summary of changes).
+/// In reduce mode the endpoint is checked before any file is touched.
 /// Files are processed concurrently on the tokio runtime.
 pub async fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     let tracked = files::tracked_source_files(root)?;
-    let llm = Arc::new(cfg.endpoint.as_ref().map(|_| LlmClient::new(cfg)));
+    let llm = (cfg.mode == Mode::Reduce).then(|| LlmClient::new(cfg));
+    if let Some(client) = &llm {
+        client.check().await?;
+    }
+    let llm = Arc::new(llm);
     let cfg = Arc::new(cfg.clone());
 
     let mut set = JoinSet::new();
@@ -68,26 +70,27 @@ pub async fn run(root: &Path, cfg: &Config) -> Result<Stats> {
         ..Stats::default()
     };
     while let Some(res) = set.join_next().await {
-        stats.merge(res?);
+        stats.merge(res??);
     }
     Ok(stats)
 }
 
 /// Read, analyze and (if anything changed) rewrite one file. Recoverable failures (unreadable /
 /// non-UTF-8 file, a parser error) are reported with a warning and the file is skipped.
+/// An LLM failure is not recoverable: it is returned as an error and aborts the run.
 async fn process_file(
     path: PathBuf,
     lang: Language,
     llm: Arc<Option<LlmClient>>,
     cfg: Arc<Config>,
-) -> FileResult {
+) -> Result<FileResult> {
     let mut result = FileResult::default();
 
     let src = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(err) => {
             eprintln!("warning: skipping {} (unreadable: {err})", path.display());
-            return result;
+            return Ok(result);
         }
     };
 
@@ -95,7 +98,7 @@ async fn process_file(
         Ok(c) => c,
         Err(err) => {
             eprintln!("skipping {path}: {err}", path = path.display());
-            return result;
+            return Ok(result);
         }
     };
     let blocks = parse::group_blocks(&src, comments);
@@ -103,7 +106,7 @@ async fn process_file(
 
     let mut edits = Vec::new();
     for block in &blocks {
-        let analysis = prose::analyze(block, lang, cfg.max_summary_words);
+        let analysis = prose::analyze(block, lang);
         let structural = structural::is_structural(block, lang, &src);
         let action = policy::decide(block, &analysis, structural, &cfg);
 
@@ -121,22 +124,17 @@ async fn process_file(
                 }
                 edits.push(rewrite::delete_edit(&src, block));
             }
-            Action::Reduce { prose, fallback } => {
+            Action::Reduce { prose } => {
                 let context = first_nonblank_after(&lines, block.end_line);
-                let verdict = match llm.as_ref() {
-                    Some(client) => match client
-                        .summarize(&prose, &context, cfg.max_summary_words)
-                        .await
-                    {
-                        Ok(v) => v,
-                        Err(_) => {
-                            result.llm_fallbacks += 1;
-                            llm::Verdict::Line(fallback)
-                        }
-                    },
-                    None => llm::Verdict::Line(fallback),
-                };
                 let line = block.start_line + 1;
+                let client = llm
+                    .as_ref()
+                    .as_ref()
+                    .context("reduce mode requires an LLM")?;
+                let verdict = client
+                    .summarize(&prose, &context, cfg.max_summary_words)
+                    .await
+                    .with_context(|| format!("{}:{line}: LLM failed", path.display()))?;
                 match verdict {
                     llm::Verdict::Delete => {
                         result.deleted += 1;
@@ -162,7 +160,7 @@ async fn process_file(
     }
 
     if edits.is_empty() {
-        return result;
+        return Ok(result);
     }
 
     let new_src = rewrite::apply(&src, edits);
@@ -176,7 +174,7 @@ async fn process_file(
         }
     }
 
-    result
+    Ok(result)
 }
 
 /// First non-blank line strictly after `end_line` (0-based), trimmed and capped at 120 chars.

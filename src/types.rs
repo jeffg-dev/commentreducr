@@ -88,11 +88,9 @@ pub enum Mode {
 pub enum Action {
     Keep,
     Delete,
-    /// Replace the block with a single-line comment. `prose` is the cleaned comment text to summarize;
-    /// `fallback` is the extractive one-liner used when no LLM is available or it fails.
+    /// Replace the block with a single-line comment. `prose` is the cleaned comment text to summarize.
     Reduce {
         prose: String,
-        fallback: String,
     },
 }
 
@@ -105,8 +103,8 @@ pub struct Config {
     pub min_density: f64,
     /// Target maximum words for the one-line summary.
     pub max_summary_words: usize,
-    /// None = extractive only (no LLM).
-    pub endpoint: Option<String>,
+    /// OpenAI-compatible base URL. Required in reduce mode; unused in delete mode.
+    pub endpoint: String,
     pub model: String,
     pub api_key: Option<String>,
     pub llm_concurrency: usize,

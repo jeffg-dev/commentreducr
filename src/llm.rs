@@ -28,7 +28,13 @@ directly and drop everything else. Preserve identifiers verbatim.\n\n\
 DELETE if the comment merely restates or narrates what the code does, gives history, tickets, \
 authors or dates, describes how other code or modules behave, explains design rationale that is \
 evident from the code, teaches general library or language facts, is commented-out code, or is \
-filler. Most comments should be DELETE.";
+filler.\n\n\
+The test: is the fact visible from the identifiers on the next code line? compare_digest is \
+constant-time, safe_load is safe, Object.freeze prevents mutation, debounce(300) waits 300ms, \
+range excludes its upper bound: all visible, so DELETE even when phrased as a warning. Keep when \
+the line looks ordinary but hides a trap the reader cannot see: a library silently dropping or \
+reusing something, a required call order, shared state that must not be mutated, a value that \
+leaks or hangs, a limit that fails without an error. Most comments should be DELETE.";
 
 /// Few-shot demos: (comment prose, next code line, expected reply).
 const DEMOS: &[(&str, &str, &str)] = &[
@@ -46,6 +52,13 @@ const DEMOS: &[(&str, &str, &str)] = &[
         "Caller must hold self._lock; the cache map is not thread safe",
     ),
     (
+        "We use compare_digest here instead of == because == short-circuits on the first differing \
+         byte and an attacker could measure the response time to learn the token one byte at a time. \
+         This is a classic timing attack.",
+        "if not hmac.compare_digest(provided, expected):",
+        "DELETE",
+    ),
+    (
         "Previously this used the legacy HttpClient from utils/http, but that was removed in the v3 \
          refactor (ticket PLAT-2211). The new fetch wrapper handles retries itself, so we just call \
          it here and let the middleware layer deal with auth headers.",
@@ -58,6 +71,13 @@ const DEMOS: &[(&str, &str, &str)] = &[
          the request will wait over an hour.",
         "timeout: 5,",
         "timeout is seconds, not ms; upstream multiplies by 1000",
+    ),
+    (
+        "We freeze the config object so that nothing downstream can accidentally mutate it. An \
+         earlier version had a nasty bug where a plugin overwrote the base URL at runtime and every \
+         request went to the wrong host.",
+        "export const config = Object.freeze({",
+        "DELETE",
     ),
     (
         "We use Array.prototype.reduce here to build up the lookup object in a single pass. reduce \
@@ -74,10 +94,31 @@ const DEMOS: &[(&str, &str, &str)] = &[
         "libfoo 2.3 drops the last buffered write if close() follows write() immediately",
     ),
     (
-        "Initialize the running total to zero. Then for every row that matches the filter, add its \
-         amount to the total. Finally return the total to the caller.",
-        "total = 0",
+        "Wait 300ms after the last keystroke before firing the search so that we don't hammer the \
+         API with a request per character. 300 felt about right in testing; 500 felt laggy.",
+        "const search = debounce(runSearch, 300);",
         "DELETE",
+    ),
+    (
+        "Careful with the order here. We have to flush and close the handle before calling \
+         rename(), otherwise on NFS mounts the rename can land before the last buffer is written \
+         and readers see a truncated file. Bit us in the export job for weeks.",
+        "fh.close()",
+        "close() must precede rename(); on NFS the last buffer can land after the rename",
+    ),
+    (
+        "This looks redundant but it isn't: axios treats a 3xx as success only when maxRedirects \
+         is 0, and with the default it follows the redirect and strips our custom auth header, so \
+         we end up with an HTML login page parsed as JSON. Handle redirects by hand.",
+        "const res = await axios.get(url, { maxRedirects: 0 });",
+        "axios strips the custom auth header on redirects; follow them manually",
+    ),
+    (
+        "FYI: this dict is created once at import time and shared by every request handler in the \
+         process. Mutating it from a handler leaks state between users, which is exactly what \
+         happened in the profile bug last quarter. Copy it first if you need to change anything.",
+        "DEFAULT_HEADERS = {",
+        "shared across requests; copy before mutating",
     ),
 ];
 

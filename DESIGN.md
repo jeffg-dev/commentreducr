@@ -49,6 +49,20 @@ one-liner is used and nothing is deleted.
 path and prints decision accuracy, DELETE precision/recall, and every mismatch — use it to
 iterate on the prompt or demos.
 
+## Token budget and prefix caching
+
+oMLX prefix-caches in 512-token blocks: cached tokens per request = the constant prefix rounded
+down to a multiple of 512. The constant prefix (system prompt + 12 demos + "Comment:") is
+tuned to ~1590 tokens so 1536 are cached and only ~55 tokens of prefix plus the comment
+(~100 tokens) are prefilled per request. Completions average ~6 tokens because a delete verdict
+is a two-character class code. Measure with `--eval` (prints per-request prompt/cached/completion
+tokens); a one-row dataset with a tiny comment gives the prefix size directly.
+
+If you edit the prompt or demos, keep the prefix just above a 512 boundary. Compressing the
+taxonomy wording was tried and cost ~8 points of accuracy; adding demos to reach the next
+boundary is the better lever. Prose sent to the model is capped at 150 words and the context
+line at 80 chars.
+
 ## LLM endpoint
 
 OpenAI-compatible `/v1/chat/completions`, default `http://localhost:8000/v1`, model

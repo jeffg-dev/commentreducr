@@ -48,6 +48,19 @@ export COMMENTREDUCR_API_KEY=sk-...
 commentreducr <path> --reduce
 ```
 
+## Development
+
+```sh
+git clone https://github.com/jeffg-dev/commentreducr && cd commentreducr
+cargo test                                            # unit + CLI tests
+cargo fmt --check && cargo clippy --all-targets -- -D warnings   # what CI enforces
+cargo run -- <path> --delete --dry-run                # try it on a repo
+cargo run -- --eval tools/dataset/comments.jsonl      # score the LLM prompt (needs an endpoint)
+```
+
+Changes go through a PR; main requires CI to pass. See [DESIGN.md](DESIGN.md) for how the
+pipeline works and [tools/dataset](tools/dataset) for the prompt-tuning rubric.
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).

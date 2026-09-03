@@ -22,6 +22,12 @@ commentreducr <path> --reduce    # summarize dense prose blocks to one line (nee
 otherwise it scans first, then shows progress (percent, blocks, files, time left, token
 counts and throughput) on stderr and prints token totals at the end.
 
+Files that fail to parse are skipped with a warning. To report one, run
+`commentreducr --diagnose <path>` (the repo, a subdirectory or a single file): it parses only,
+touches nothing, and prints a redacted report to stdout (node kinds, positions and line shapes
+with letters and digits masked, no paths or code) that is safe to paste into an issue. The
+path behind each numbered file goes to stderr so you can review it first.
+
 ## LLM for `--reduce`
 
 Any OpenAI-compatible chat endpoint. The prompt is tuned for

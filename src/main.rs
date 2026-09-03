@@ -18,6 +18,11 @@ struct Cli {
     #[arg(long, value_name = "JSONL")]
     eval: Option<PathBuf>,
 
+    /// Parse only, no LLM, no writes: print a redacted report of every file that fails to parse
+    /// (node kinds and line shapes, no paths or code) for pasting into a bug report.
+    #[arg(long, conflicts_with = "eval")]
+    diagnose: bool,
+
     /// Reduce large dense comment blocks to one line (default).
     #[arg(long, conflicts_with = "delete")]
     reduce: bool,
@@ -121,7 +126,17 @@ fn main() -> Result<()> {
     if let Some(dataset) = &cli.eval {
         return commentreducr::eval::run(dataset, &cfg);
     }
-    let stats = run(cli.path.as_deref().unwrap(), &cfg)?;
+    let path = cli.path.as_deref().unwrap();
+    if cli.diagnose {
+        println!("commentreducr {}", env!("CARGO_PKG_VERSION"));
+        let bad = commentreducr::diagnose(path)?;
+        eprintln!("{bad} files with parse errors");
+        if bad > 0 {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+    let stats = run(path, &cfg)?;
     eprintln!(
         "{} files scanned, {} changed, {} skipped; comments: {} kept, {} deleted, {} reduced, {} LLM failures",
         stats.files_scanned,

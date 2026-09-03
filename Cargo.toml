@@ -8,7 +8,7 @@ repository = "https://github.com/jeffg-dev/commentreducr"
 readme = "README.md"
 keywords = ["comments", "cli", "tree-sitter", "refactoring"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["tools/", "DESIGN.md"]
+exclude = ["tools/", "assets/", "DESIGN.md"]
 
 [dependencies]
 anyhow = "1.0.104"

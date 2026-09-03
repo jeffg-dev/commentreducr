@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/banner.jpg" alt="commentreducr" width="600"></p>
+
 # commentreducr
 
 Strips low-value comments from JS/TS/Python in a git repo. Keeps structural comments

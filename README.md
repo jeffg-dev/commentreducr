@@ -20,6 +20,34 @@ commentreducr <path> --delete   # remove all non-structural comments
 Add `--dry-run` to preview changes without writing files, or `--no-llm` to skip the
 LLM-based summarization in `--reduce` mode.
 
+## LLM setup for `--reduce`
+
+`--reduce` sends each dense comment block to an OpenAI-compatible chat endpoint and asks a
+model whether to keep, summarize, or delete it. You need to point it at a server.
+
+The prompt is tuned against [Gemma 4 E2B](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit)
+(`gemma-4-e2b-it-4bit`, MLX), and that is the default model name. We recommend
+[oMLX](https://github.com/jundot/omlx) on Apple Silicon because it prefix-caches the prompt,
+but any OpenAI-compatible server (vLLM, LM Studio, Ollama, llama.cpp, a hosted API) works.
+Other models will run but the keep/delete accuracy is only measured on Gemma 4 E2B.
+
+Configure with flags or environment variables:
+
+| Flag         | Env var                 | Default                    |
+|--------------|-------------------------|----------------------------|
+| `--endpoint` | `COMMENTREDUCR_ENDPOINT`| `http://localhost:8000/v1` |
+| `--model`    | `COMMENTREDUCR_MODEL`   | `gemma-4-e2b-it-4bit`      |
+| `--api-key`  | `COMMENTREDUCR_API_KEY` | none (also reads `OPENAI_API_KEY`) |
+
+Example against a hosted provider:
+
+```sh
+export COMMENTREDUCR_ENDPOINT=https://api.example.com/v1
+export COMMENTREDUCR_MODEL=some-model
+export COMMENTREDUCR_API_KEY=sk-...
+commentreducr <path> --reduce
+```
+
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).

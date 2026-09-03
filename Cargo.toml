@@ -12,7 +12,7 @@ exclude = ["tools/", "DESIGN.md"]
 
 [dependencies]
 anyhow = "1.0.104"
-clap = { version = "4.6.6", features = ["derive"] }
+clap = { version = "4.6.6", features = ["derive", "env"] }
 regex = "1.13.1"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 rust-stemmers = "1.2.0"

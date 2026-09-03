@@ -7,7 +7,7 @@ use crate::types::{Action, CommentBlock, Config, Mode};
 /// - Delete mode => Delete
 /// - Reduce mode: keep trailing/inline comments (not own_line or code_after), keep blocks with
 ///   fewer than `min_lines` prose lines, keep low-density blocks (words_per_line < min_density),
-///   keep code_like blocks; otherwise Reduce { prose: analysis.text, fallback: analysis.extractive }.
+///   keep code_like blocks; otherwise Reduce { prose: analysis.text }.
 pub fn decide(
     block: &CommentBlock,
     analysis: &ProseAnalysis,
@@ -34,7 +34,6 @@ pub fn decide(
             }
             Action::Reduce {
                 prose: analysis.text.clone(),
-                fallback: analysis.extractive.clone(),
             }
         }
     }
@@ -50,7 +49,7 @@ mod tests {
             min_lines: 2,
             min_density: 3.0,
             max_summary_words: 12,
-            endpoint: None,
+            endpoint: String::new(),
             model: String::new(),
             api_key: None,
             llm_concurrency: 1,
@@ -81,7 +80,6 @@ mod tests {
             word_count: 0,
             words_per_line,
             code_like,
-            extractive: "some prose".into(),
         }
     }
 

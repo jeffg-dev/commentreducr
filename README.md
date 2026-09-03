@@ -18,7 +18,7 @@ commentreducr <path> --delete    # remove all non-structural comments
 commentreducr <path> --reduce    # summarize dense prose blocks to one line (needs an LLM)
 ```
 
-`--dry-run` previews. `--no-llm` makes `--reduce` extractive only.
+`--delete --dry-run` counts without writing. `--reduce` fails if the LLM is unreachable.
 
 ## LLM for `--reduce`
 

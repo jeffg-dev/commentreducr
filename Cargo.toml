@@ -1,6 +1,6 @@
 [package]
 name = "commentreducr"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Strip low-value comments from a JS/TS/Python codebase, keeping structural ones"
@@ -15,7 +15,6 @@ anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 regex = "1.13.1"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
-rust-stemmers = "1.2.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "fs", "time"] }

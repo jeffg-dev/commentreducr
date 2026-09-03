@@ -9,7 +9,7 @@ byte-for-byte untouched, and structural comments must be preserved.
 
 files::tracked_source_files -> parse::extract_comments -> parse::group_blocks
   -> for each block: prose::analyze, structural::is_structural, policy::decide
-  -> Reduce actions: llm::LlmClient::summarize (fallback = extractive) 
+  -> Reduce actions: llm::LlmClient::summarize (any failure aborts the run)
   -> rewrite::{delete_edit,reduce_edit} -> rewrite::apply -> write file
 
 ## Modes
@@ -42,8 +42,9 @@ either `DELETE` or one terse line (<= max_words). `llm::Verdict` carries that; r
 the block on `DELETE`. The system prompt states the rubric and seven few-shot demos (both
 languages, majority DELETE) are sent as prior user/assistant turns. Only blocks that pass the
 policy gate (own-line, >= min_lines prose lines, >= min_density words/line, not code-like) reach
-the model; shorter blocks are kept untouched. Without an endpoint (`--no-llm`) the extractive
-one-liner is used and nothing is deleted.
+the model; shorter blocks are kept untouched. Reduce mode requires the LLM: `LlmClient::check`
+runs before any file is touched, and a failed call aborts the run. There is no extractive
+fallback. `--dry-run` applies to `--delete` only.
 
 `--eval tools/dataset/comments.jsonl` runs the labeled dataset through the exact runtime prompt
 path and prints decision accuracy, DELETE precision/recall, and every mismatch — use it to

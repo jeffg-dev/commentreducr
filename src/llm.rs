@@ -208,12 +208,7 @@ impl LlmClient {
             .timeout(Duration::from_secs(60))
             .build()
             .expect("failed to build reqwest client");
-        let endpoint = cfg
-            .endpoint
-            .clone()
-            .unwrap_or_default()
-            .trim_end_matches('/')
-            .to_string();
+        let endpoint = cfg.endpoint.trim_end_matches('/').to_string();
         LlmClient {
             client,
             endpoint,
@@ -224,9 +219,27 @@ impl LlmClient {
         }
     }
 
+    /// Preflight: one tiny completion to prove the endpoint is reachable and the model loads.
+    pub async fn check(&self) -> Result<()> {
+        let body = json!({
+            "model": self.model,
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1,
+        });
+        self.post(&format!("{}/chat/completions", self.endpoint), &body)
+            .await
+            .with_context(|| {
+                format!(
+                    "cannot reach LLM at {} with model {} (--reduce needs it)",
+                    self.endpoint, self.model
+                )
+            })?;
+        Ok(())
+    }
+
     /// Ask the model what to do with a comment block. `prose` is the cleaned comment text and
     /// `context` the first non-blank code line after it (may be empty). Returns Err on transport
-    /// failure or unusable output; the caller then falls back to the extractive summary.
+    /// failure or unusable output.
     pub async fn summarize(&self, prose: &str, context: &str, max_words: usize) -> Result<Verdict> {
         let _permit = self
             .semaphore

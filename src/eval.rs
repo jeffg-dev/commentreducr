@@ -30,9 +30,8 @@ fn language(name: &str) -> Result<Language> {
     })
 }
 
-/// Turn a raw comment block (delimiters included) into the same prose the tool would send,
-/// plus the extractive fallback the tool would use if the model fails.
-fn prose_of(comment: &str, lang: Language) -> Result<(String, String)> {
+/// Turn a raw comment block (delimiters included) into the same prose the tool would send.
+fn prose_of(comment: &str, lang: Language) -> Result<String> {
     let comments = parse::extract_comments(comment, lang)?;
     let first = comments
         .first()
@@ -49,8 +48,7 @@ fn prose_of(comment: &str, lang: Language) -> Result<(String, String)> {
         kind: first.kind,
         comments,
     };
-    let a = prose::analyze(&block, lang, 20);
-    Ok((a.text, a.extractive))
+    Ok(prose::analyze(&block, lang).text)
 }
 
 pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
@@ -68,15 +66,11 @@ pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
         let llm = llm.clone();
         set.spawn(async move {
             let lang = language(&row.language)?;
-            let (p, fallback) = prose_of(&row.comment, lang)?;
-            // Mirror the runtime: a failed model call falls back to the extractive line.
-            let v = match llm.summarize(&p, &row.context, max_words).await {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!("{}: fallback ({e})", row.id);
-                    Verdict::Line(fallback)
-                }
-            };
+            let p = prose_of(&row.comment, lang)?;
+            let v = llm
+                .summarize(&p, &row.context, max_words)
+                .await
+                .with_context(|| format!("{}: model failed", row.id))?;
             Ok::<_, anyhow::Error>((row, v))
         });
     }
@@ -85,10 +79,7 @@ pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
         (0, 0, 0, 0, 0, 0);
     let mut results = Vec::new();
     while let Some(r) = set.join_next().await {
-        match r? {
-            Ok(x) => results.push(x),
-            Err(e) => eprintln!("row failed: {e:#}"),
-        }
+        results.push(r??);
     }
     results.sort_by(|a, b| a.0.id.cmp(&b.0.id));
     for (row, v) in &results {

@@ -74,24 +74,35 @@ fn make_comment(src: &str, node: &tree_sitter::Node) -> Comment {
     }
 }
 
-static TYPEOF_IMPORT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(typeof\s+)import(\s*\()").unwrap());
+/// `import('m')` in a type: optionally preceded by `typeof`, or opening a type-argument list.
+static IMPORT_TYPE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(typeof\s+|<\s*)import\(\s*(?:'[^'\n]*'|"[^"\n]*")\s*\)"#).unwrap()
+});
 
 /// The text tree-sitter actually sees: `src` with a couple of byte-length-preserving edits that
 /// work around grammar limitations, so node offsets still index `src` directly.
 ///
 /// - A raw NUL byte (legal inside a JS/TS string) is a hard lexer error; parse it as a space.
-/// - `f<typeof import('m')>()` (the Vitest `importOriginal` idiom) fails in tree-sitter-typescript
-///   0.23 (tree-sitter/tree-sitter-typescript#367): the parser commits to `f < typeof ...`.
-///   `typeof IMPORT(...)` parses as a type query in every position, and in expression position an
-///   identifier call has the same shape as a dynamic import, so the swap changes nothing else.
+/// - `f<import('m')>()` and `f<typeof import('m')>()` (the Vitest `importOriginal` idiom) fail in
+///   tree-sitter-typescript 0.23 (tree-sitter/tree-sitter-typescript#367): at `<` the parser
+///   commits to a comparison and never reaches the type-argument reading. `typeof III…` of the
+///   same length parses as a type query in every position, including with `.Bar` / `['k']`
+///   suffixes, and in expression position it is still a plain unary expression.
 fn parse_input(src: &str, lang: Language) -> Cow<'_, str> {
     let mut text = Cow::Borrowed(src);
     if text.contains('\0') {
         text = Cow::Owned(text.replace('\0', " "));
     }
     if matches!(lang, Language::TypeScript | Language::Tsx)
-        && let Cow::Owned(s) = TYPEOF_IMPORT_RE.replace_all(&text, "${1}IMPORT${2}")
+        && let Cow::Owned(s) = IMPORT_TYPE_RE.replace_all(&text, |c: &regex::Captures| {
+            let prefix = &c[1];
+            let rest = c[0].len() - prefix.len();
+            if prefix.starts_with('<') {
+                format!("{prefix}typeof {}", "I".repeat(rest - 7))
+            } else {
+                format!("{prefix}{}", "I".repeat(rest))
+            }
+        })
     {
         text = Cow::Owned(s);
     }
@@ -318,7 +329,7 @@ mod tests {
     fn grammar_workarounds_keep_offsets() {
         // tree-sitter/tree-sitter-typescript#367 plus a raw NUL inside a string; both must parse,
         // and comment text must come from the original source.
-        let src = "vi.mock('./m', async (importOriginal) => {\n  // keep: typeof import('x')\n  const actual = await importOriginal<typeof import('./m')>();\n  return [actual].join(\"\0\"); // trailing\n});\n";
+        let src = "vi.mock('./m', async (importOriginal) => {\n  // keep: typeof import('x')\n  const actual = await importOriginal<typeof import('./m')>();\n  const bar = f<import(\"./m\").Bar>();\n  return [actual, bar].join(\"\0\"); // trailing\n});\n";
         assert!(diagnose(src, Language::TypeScript).unwrap().is_none());
         let comments = extract_comments(src, Language::TypeScript).unwrap();
         let texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();

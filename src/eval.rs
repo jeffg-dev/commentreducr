@@ -7,6 +7,7 @@ use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::task::JoinSet;
 
 #[derive(Deserialize, Clone)]
@@ -29,8 +30,9 @@ fn language(name: &str) -> Result<Language> {
     })
 }
 
-/// Turn a raw comment block (delimiters included) into the same prose the tool would send.
-fn prose_of(comment: &str, lang: Language) -> Result<String> {
+/// Turn a raw comment block (delimiters included) into the same prose the tool would send,
+/// plus the extractive fallback the tool would use if the model fails.
+fn prose_of(comment: &str, lang: Language) -> Result<(String, String)> {
     let comments = parse::extract_comments(comment, lang)?;
     let first = comments.first().ok_or_else(|| anyhow!("no comment parsed"))?;
     let last = comments.last().unwrap();
@@ -45,7 +47,8 @@ fn prose_of(comment: &str, lang: Language) -> Result<String> {
         kind: first.kind,
         comments,
     };
-    Ok(prose::analyze(&block, lang, 20).text)
+    let a = prose::analyze(&block, lang, 20);
+    Ok((a.text, a.extractive))
 }
 
 pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
@@ -63,8 +66,15 @@ pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
         let llm = llm.clone();
         set.spawn(async move {
             let lang = language(&row.language)?;
-            let p = prose_of(&row.comment, lang)?;
-            let v = llm.summarize(&p, &row.context, max_words).await?;
+            let (p, fallback) = prose_of(&row.comment, lang)?;
+            // Mirror the runtime: a failed model call falls back to the extractive line.
+            let v = match llm.summarize(&p, &row.context, max_words).await {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("{}: fallback ({e})", row.id);
+                    Verdict::Line(fallback)
+                }
+            };
             Ok::<_, anyhow::Error>((row, v))
         });
     }
@@ -103,6 +113,18 @@ pub async fn run(dataset: &Path, cfg: &Config) -> Result<()> {
         100.0 * both_del as f64 / got_del.max(1) as f64,
         100.0 * both_del as f64 / exp_del.max(1) as f64,
         kept_words as f64 / kept.max(1) as f64
+    );
+    let t = &llm.tokens;
+    let (rq, pt, ct, ca) = (
+        t.requests.load(Ordering::Relaxed),
+        t.prompt.load(Ordering::Relaxed),
+        t.completion.load(Ordering::Relaxed),
+        t.cached.load(Ordering::Relaxed),
+    );
+    println!(
+        "tokens: {rq} requests, {pt} prompt ({:.0}/req, {ca} cached), {ct} completion ({:.1}/req)",
+        pt as f64 / rq.max(1) as f64,
+        ct as f64 / rq.max(1) as f64
     );
     Ok(())
 }

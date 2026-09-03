@@ -5,6 +5,7 @@ use regex::Regex;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -17,24 +18,40 @@ pub enum Verdict {
     Line(String),
 }
 
-const SYSTEM_PROMPT: &str = "You decide what to do with a source code comment. Reply with exactly one line: \
-either the single word DELETE, or a replacement comment of at most {max_words} words. No quotes, \
-no markdown, no preamble, no comment delimiters.\n\n\
-Keep (rewritten tersely) only if the comment tells the reader something the code cannot: a \
-surprising or non-obvious behaviour, invariant or constraint; a danger or caution (thread safety, \
-security, data loss, ordering, units, performance cliff, must-call-X-first); or a workaround for an \
-external bug or quirk that would otherwise look like a mistake. Name the surprise or danger \
-directly and drop everything else. Preserve identifiers verbatim.\n\n\
-DELETE if the comment merely restates or narrates what the code does, gives history, tickets, \
-authors or dates, describes how other code or modules behave, explains design rationale that is \
-evident from the code, teaches general library or language facts, is commented-out code, or is \
-filler.\n\n\
-The test: is the fact visible from the identifiers on the next code line? compare_digest is \
-constant-time, safe_load is safe, Object.freeze prevents mutation, debounce(300) waits 300ms, \
-range excludes its upper bound: all visible, so DELETE even when phrased as a warning. Keep when \
-the line looks ordinary but hides a trap the reader cannot see: a library silently dropping or \
-reusing something, a required call order, shared state that must not be mutated, a value that \
-leaks or hangs, a limit that fails without an error. Most comments should be DELETE.";
+const SYSTEM_PROMPT: &str = "You classify a source code comment and reply with exactly one line. First the class \
+code (K1-K7 or D1-D8 below). For a D class that is the whole reply. For a K class, follow the code \
+with a space and a replacement comment of at most {max_words} words. No quotes, no markdown, no \
+preamble, no comment delimiters.\n\n\
+KEEP only if the comment falls in one of these classes:\n\
+K1 Library, runtime, OS or browser quirk: the call behaves differently than its name or docs \
+suggest (silently drops, reuses, truncates, fires twice, hangs) and this code works around it.\n\
+K2 Ordering requirement: this line must come before or after another or something breaks silently.\n\
+K3 Shared or mutable state hazard: lock must be held, object shared across threads, instances or \
+requests, must not be mutated.\n\
+K4 Security or privacy hazard: the value holds secrets or untrusted input; never log, never trust.\n\
+K5 Unit, index or encoding mismatch that the code does not show: seconds vs milliseconds, device \
+vs CSS pixels, sectors vs bytes, 1-indexed vs 0-indexed. If the code line already converts \
+(* 1000, + 1, errors=...) it is visible and not K5.\n\
+K6 Silent failure: without this exact form something hangs, leaks or loses data with no error.\n\
+K7 Looks like a bug or dead code but is required: an unused parameter a framework needs, a \
+redundant-looking call that must stay. Not for compatibility notes or design choices.\n\n\
+DELETE if the comment is any of these, even when phrased as a warning:\n\
+D1 Describes what the code does or the steps it takes.\n\
+D2 Justifies a call or operator whose name already says why: compare_digest, safe_load, freeze, \
+debounce, ??, range bounds.\n\
+D3 History: tickets, authors, dates, past bugs, what the code used to do.\n\
+D4 Describes other modules, services or files, or what must be kept in sync elsewhere.\n\
+D5 General education about a library or language feature.\n\
+D6 Section banners, overviews, tables of contents, plans.\n\
+D7 Commented-out code, apologies, opinions, tuning anecdotes.\n\
+D8 Merely useful context that does not prevent a mistake.\n\n\
+Before choosing a K class, check the next code line: if the identifier, argument name, operator \
+or arithmetic on it already reveals the fact (safe_load, compare_digest, errors='replace', \
+?? '', * 1000, + 1, allow_redirects=False) the reader can see it and the class is D2.\n\n\
+When you keep, write the line as: the trap, then a semicolon, then what to do. Name the library \
+or identifier. Drop the story, the reasoning and the consequences beyond the trap itself. \
+Example reply: K1 requests drops Authorization on cross-host redirects; follow them manually. \
+Most comments are a D class.";
 
 /// Few-shot demos: (comment prose, next code line, expected reply).
 const DEMOS: &[(&str, &str, &str)] = &[
@@ -42,68 +59,68 @@ const DEMOS: &[(&str, &str, &str)] = &[
         "Loop over each user in the list and check whether their subscription has expired. If it \
          has, add them to the expired list so we can send the reminder email later on in the batch job.",
         "for user in users:",
-        "DELETE",
+        "D1",
     ),
     (
         "Important: this must be called with the lock held. The cache map is not thread safe and \
          we've seen corruption in production when two workers refresh at the same time. See the \
          incident from last March.",
         "def _refresh_cache(self):",
-        "Caller must hold self._lock; the cache map is not thread safe",
+        "K3 caller must hold self._lock; the cache map is not thread safe",
     ),
     (
         "We use compare_digest here instead of == because == short-circuits on the first differing \
          byte and an attacker could measure the response time to learn the token one byte at a time. \
          This is a classic timing attack.",
         "if not hmac.compare_digest(provided, expected):",
-        "DELETE",
+        "D2",
     ),
     (
         "Previously this used the legacy HttpClient from utils/http, but that was removed in the v3 \
          refactor (ticket PLAT-2211). The new fetch wrapper handles retries itself, so we just call \
          it here and let the middleware layer deal with auth headers.",
         "const res = await fetchJson(url);",
-        "DELETE",
+        "D3",
     ),
     (
         "Note that the timeout here is in seconds, not milliseconds like everywhere else in this \
          file, because the upstream API multiplies it by 1000 on its side. Passing 5000 here means \
          the request will wait over an hour.",
         "timeout: 5,",
-        "timeout is seconds, not ms; upstream multiplies by 1000",
+        "K5 timeout is seconds, not ms; upstream multiplies by 1000",
     ),
     (
         "We freeze the config object so that nothing downstream can accidentally mutate it. An \
          earlier version had a nasty bug where a plugin overwrote the base URL at runtime and every \
          request went to the wrong host.",
         "export const config = Object.freeze({",
-        "DELETE",
+        "D2",
     ),
     (
         "We use Array.prototype.reduce here to build up the lookup object in a single pass. reduce \
          takes an accumulator and the current item and returns the new accumulator, which is more \
          efficient than creating a new object each iteration with the spread operator.",
         "const byId = items.reduce((acc, item) => {",
-        "DELETE",
+        "D5",
     ),
     (
         "Ugly hack: we sleep for 50ms before closing because the underlying C library (libfoo 2.3) \
          drops the last buffered write if close() is called immediately after write(). This is fixed \
          upstream in 2.4 but we can't upgrade yet.",
         "time.sleep(0.05)",
-        "libfoo 2.3 drops the last buffered write if close() follows write() immediately",
+        "K1 libfoo 2.3 drops the last buffered write if close() follows write() immediately",
     ),
     (
         "Wait 300ms after the last keystroke before firing the search so that we don't hammer the \
          API with a request per character. 300 felt about right in testing; 500 felt laggy.",
         "const search = debounce(runSearch, 300);",
-        "DELETE",
+        "D7",
     ),
     (
         "Initialize the running total to zero. Then for every row that matches the filter, add its \
          amount to the total. Finally return the total to the caller.",
         "total = 0",
-        "DELETE",
+        "D1",
     ),
 ];
 
@@ -121,11 +138,39 @@ pub struct LlmClient {
     model: String,
     api_key: Option<String>,
     semaphore: Semaphore,
+    pub tokens: TokenTotals,
 }
 
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: Option<Usage>,
+}
+
+#[derive(Deserialize, Default)]
+struct Usage {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
+    #[serde(default)]
+    prompt_tokens_details: Option<PromptDetails>,
+}
+
+#[derive(Deserialize, Default)]
+struct PromptDetails {
+    #[serde(default)]
+    cached_tokens: u64,
+}
+
+/// Running token totals across all requests (prompt, completion, cached-prompt).
+#[derive(Debug, Default)]
+pub struct TokenTotals {
+    pub prompt: AtomicU64,
+    pub completion: AtomicU64,
+    pub cached: AtomicU64,
+    pub requests: AtomicU64,
 }
 
 #[derive(Deserialize)]
@@ -156,6 +201,7 @@ impl LlmClient {
             model: cfg.model.clone(),
             api_key: cfg.api_key.clone(),
             semaphore: Semaphore::new(cfg.llm_concurrency.max(1)),
+            tokens: TokenTotals::default(),
         }
     }
 
@@ -194,10 +240,22 @@ impl LlmClient {
         };
 
         let cleaned = clean_reply(&raw);
+        if std::env::var_os("COMMENTREDUCR_DEBUG").is_some() {
+            eprintln!("llm raw: {raw:?}");
+        }
         if cleaned.is_empty() {
             bail!("empty reply from LLM after cleanup");
         }
-        if cleaned.trim_end_matches(['.', '!']).eq_ignore_ascii_case("delete") {
+        // Reply shape: "D3" (delete) or "K1 <line>" (keep). Tolerate a bare DELETE too.
+        let (code, rest) = cleaned.split_once(' ').unwrap_or((cleaned.as_str(), ""));
+        let code = code.trim_end_matches([':', '.', '-']);
+        let is_class = |c: char| code.len() == 2 && code.starts_with(c) && code.as_bytes()[1].is_ascii_digit();
+        if is_class('D') || code.eq_ignore_ascii_case("delete") {
+            return Ok(Verdict::Delete);
+        }
+        let cleaned = if is_class('K') { rest.trim().to_string() } else { cleaned };
+        if cleaned.is_empty() {
+            // The model wanted to keep it but could not say what the trap is: delete.
             return Ok(Verdict::Delete);
         }
         let word_count = cleaned.split_whitespace().count();
@@ -217,6 +275,13 @@ impl LlmClient {
             .error_for_status()
             .context("LLM returned an error status")?;
         let parsed: ChatResponse = resp.json().await.context("failed to parse LLM response")?;
+        if let Some(u) = &parsed.usage {
+            self.tokens.requests.fetch_add(1, Ordering::Relaxed);
+            self.tokens.prompt.fetch_add(u.prompt_tokens, Ordering::Relaxed);
+            self.tokens.completion.fetch_add(u.completion_tokens, Ordering::Relaxed);
+            let cached = u.prompt_tokens_details.as_ref().map_or(0, |d| d.cached_tokens);
+            self.tokens.cached.fetch_add(cached, Ordering::Relaxed);
+        }
         let content = parsed
             .choices
             .into_iter()
@@ -288,7 +353,7 @@ fn clean_reply(raw: &str) -> String {
     if cleaned.is_empty() || cleaned.chars().all(|c| !c.is_alphanumeric()) {
         return String::new();
     }
-    if !cleaned.contains(' ') && cleaned.len() < 3 {
+    if !cleaned.contains(' ') && cleaned.len() < 2 {
         return String::new();
     }
 

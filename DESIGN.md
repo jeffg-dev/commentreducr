@@ -9,7 +9,7 @@ byte-for-byte untouched, and structural comments must be preserved.
 
 files::tracked_source_files -> parse::extract_comments -> parse::group_blocks
   -> for each block: prose::analyze, structural::is_structural, policy::decide
-  -> Reduce actions: llm::LlmClient::summarize (any failure aborts the run)
+  -> Reduce actions: llm::LlmClient::summarize (a failure leaves the block unchanged)
   -> rewrite::{delete_edit,reduce_edit} -> rewrite::apply -> write file
 
 ## Modes
@@ -45,6 +45,12 @@ policy gate (own-line, >= min_lines prose lines, >= min_density words/line, not 
 the model; shorter blocks are kept untouched. Reduce mode requires the LLM: `LlmClient::check`
 runs before any file is touched. There is no extractive fallback: if a call fails mid-run the
 block is left unchanged with a warning. `--dry-run` applies to `--delete` only.
+
+Reduce mode runs in two passes: `plan_file` (read, parse, decide) over every file with no LLM
+to count the blocks that will be sent, then the real pass. `progress::Progress` shows percent,
+blocks, files, ETA and prompt/completion tokens with tokens/s; it redraws in place on a terminal
+and prints 10% milestones otherwise. Warnings and verbose output go through it so they never
+land inside the progress line. The final `tokens:` line includes the preflight request.
 
 ## Resilience
 

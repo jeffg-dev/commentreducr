@@ -188,6 +188,43 @@ pub struct TokenTotals {
     pub requests: AtomicU64,
 }
 
+/// Plain copy of `TokenTotals` at one moment.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub requests: u64,
+    pub prompt: u64,
+    pub completion: u64,
+    pub cached: u64,
+}
+
+impl TokenTotals {
+    pub fn snapshot(&self) -> TokenUsage {
+        TokenUsage {
+            requests: self.requests.load(Ordering::Relaxed),
+            prompt: self.prompt.load(Ordering::Relaxed),
+            completion: self.completion.load(Ordering::Relaxed),
+            cached: self.cached.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl std::fmt::Display for TokenUsage {
+    /// `N requests, P prompt (X/req, C cached), Q completion (Y/req)`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let rq = self.requests.max(1) as f64;
+        write!(
+            f,
+            "{} requests, {} prompt ({:.0}/req, {} cached), {} completion ({:.1}/req)",
+            self.requests,
+            self.prompt,
+            self.prompt as f64 / rq,
+            self.cached,
+            self.completion,
+            self.completion as f64 / rq
+        )
+    }
+}
+
 #[derive(Deserialize)]
 struct ChatChoice {
     message: ChatMessage,

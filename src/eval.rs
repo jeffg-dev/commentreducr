@@ -6,7 +6,6 @@ use crate::{parse, prose};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::path::Path;
-use std::sync::atomic::Ordering;
 
 #[derive(Deserialize, Clone)]
 struct Row {
@@ -103,17 +102,6 @@ pub fn run(dataset: &Path, cfg: &Config) -> Result<()> {
         100.0 * both_del as f64 / exp_del.max(1) as f64,
         kept_words as f64 / kept.max(1) as f64
     );
-    let t = &llm.tokens;
-    let (rq, pt, ct, ca) = (
-        t.requests.load(Ordering::Relaxed),
-        t.prompt.load(Ordering::Relaxed),
-        t.completion.load(Ordering::Relaxed),
-        t.cached.load(Ordering::Relaxed),
-    );
-    println!(
-        "tokens: {rq} requests, {pt} prompt ({:.0}/req, {ca} cached), {ct} completion ({:.1}/req)",
-        pt as f64 / rq.max(1) as f64,
-        ct as f64 / rq.max(1) as f64
-    );
+    println!("tokens: {}", llm.tokens.snapshot());
     Ok(())
 }

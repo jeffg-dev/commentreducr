@@ -132,6 +132,13 @@ fn main() -> Result<()> {
         stats.comments_reduced,
         stats.llm_errors,
     );
+    if let Some(t) = stats.tokens {
+        eprintln!(
+            "tokens: {t}; {:.1}s, {}",
+            stats.elapsed.as_secs_f64(),
+            commentreducr::progress::token_rates(t, stats.elapsed)
+        );
+    }
     if stats.has_errors() {
         std::process::exit(1);
     }

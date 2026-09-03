@@ -3,6 +3,7 @@ pub mod files;
 pub mod llm;
 pub mod parse;
 pub mod policy;
+pub mod progress;
 pub mod prose;
 pub mod rewrite;
 pub mod structural;
@@ -10,6 +11,7 @@ pub mod types;
 
 use anyhow::Result;
 use llm::LlmClient;
+use progress::Progress;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Mutex;
@@ -26,6 +28,10 @@ pub struct Stats {
     pub files_skipped: usize,
     /// Blocks left unchanged because the LLM call failed.
     pub llm_errors: usize,
+    /// Token usage over the run (reduce mode only).
+    pub tokens: Option<llm::TokenUsage>,
+    /// Wall time of the processing pass (after the preflight and scan).
+    pub elapsed: std::time::Duration,
 }
 
 impl Stats {
@@ -65,12 +71,30 @@ struct FileResult {
 /// best-effort: a failed LLM call leaves that block unchanged, and a panic while processing a file
 /// (a bug) skips that file. Both are warned about and counted in `Stats`; nothing is written for a
 /// file unless its whole pass succeeded.
-/// Files are processed on `cfg.llm_concurrency` worker threads.
+/// Files are processed on `cfg.llm_concurrency` worker threads. Reduce mode first does a fast
+/// scan (parse + decide, no LLM) to count the blocks that will need an LLM call, so the second
+/// pass can show percentage progress and an estimate of the time left.
 pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
-    let tracked = files::tracked_source_files(root)?;
+    let mut tracked = files::tracked_source_files(root)?;
     let llm = (cfg.mode == Mode::Reduce).then(|| LlmClient::new(cfg));
+    let mut progress = Progress::silent();
     if let Some(client) = &llm {
         client.check()?;
+        let mut total = 0;
+        tracked = parallel(tracked, cfg.llm_concurrency, |(path, lang)| {
+            reduce_block_count(path, *lang, cfg)
+        })
+        .into_iter()
+        .map(|(item, n)| {
+            total += n.unwrap_or(0);
+            item
+        })
+        .collect();
+        eprintln!(
+            "{} files, {total} comment blocks to send to the LLM",
+            tracked.len()
+        );
+        progress = Progress::new(total, tracked.len(), llm.as_ref().map(|c| &c.tokens));
     }
 
     let mut stats = Stats {
@@ -78,8 +102,13 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
         ..Stats::default()
     };
     let results = parallel(tracked, cfg.llm_concurrency, |(path, lang)| {
-        process_file(path, *lang, llm.as_ref(), cfg)
+        let r = process_file(path, *lang, llm.as_ref(), cfg, &progress);
+        progress.file_done();
+        r
     });
+    progress.finish();
+    stats.elapsed = progress.elapsed();
+    stats.tokens = llm.as_ref().map(|c| c.tokens.snapshot());
     for ((path, _), res) in results {
         match res {
             Ok(r) => stats.merge(r),
@@ -121,51 +150,71 @@ pub(crate) fn parallel<T: Send, R: Send>(
     out.into_inner().unwrap()
 }
 
+/// Read and parse one file and decide an action for every comment block (no LLM, no writes).
+/// Recoverable failures (unreadable / non-UTF-8 file, a parser error) come back as a message.
+fn plan_file(
+    path: &Path,
+    lang: Language,
+    cfg: &Config,
+) -> Result<(String, Vec<(CommentBlock, Action)>), String> {
+    let src = std::fs::read_to_string(path).map_err(|e| format!("unreadable: {e}"))?;
+    let comments = parse::extract_comments(&src, lang).map_err(|e| format!("{e:#}"))?;
+    let plan = parse::group_blocks(&src, comments)
+        .into_iter()
+        .map(|block| {
+            let analysis = prose::analyze(&block, lang);
+            let structural = structural::is_structural(&block, lang, &src);
+            let action = policy::decide(&block, &analysis, structural, cfg);
+            (block, action)
+        })
+        .collect();
+    Ok((src, plan))
+}
+
+/// Number of blocks in the file that will need an LLM call; 0 for a file that cannot be planned
+/// (the real pass will warn about it).
+fn reduce_block_count(path: &Path, lang: Language, cfg: &Config) -> usize {
+    plan_file(path, lang, cfg).map_or(0, |(_, plan)| {
+        plan.iter()
+            .filter(|(_, a)| matches!(a, Action::Reduce { .. }))
+            .count()
+    })
+}
+
 /// Read, analyze and (if anything changed) rewrite one file. Recoverable failures (unreadable /
 /// non-UTF-8 file, a parser error) are reported with a warning and the file is skipped; a failed
 /// LLM call leaves that block unchanged.
-fn process_file(path: &Path, lang: Language, llm: Option<&LlmClient>, cfg: &Config) -> FileResult {
-    let mut result = FileResult {
-        skipped: true,
-        ..FileResult::default()
-    };
-
-    let src = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(err) => {
-            eprintln!("warning: skipping {} (unreadable: {err})", path.display());
+fn process_file(
+    path: &Path,
+    lang: Language,
+    llm: Option<&LlmClient>,
+    cfg: &Config,
+    progress: &Progress,
+) -> FileResult {
+    let mut result = FileResult::default();
+    let (src, plan) = match plan_file(path, lang, cfg) {
+        Ok(p) => p,
+        Err(msg) => {
+            progress.warn(format!("skipping {} ({msg})", path.display()));
+            result.skipped = true;
             return result;
         }
     };
-
-    let comments = match parse::extract_comments(&src, lang) {
-        Ok(c) => c,
-        Err(err) => {
-            eprintln!("warning: skipping {} ({err})", path.display());
-            return result;
-        }
-    };
-    result.skipped = false;
-    let blocks = parse::group_blocks(&src, comments);
     let lines: Vec<&str> = src.lines().collect();
 
     let mut edits = Vec::new();
-    for block in &blocks {
-        let analysis = prose::analyze(block, lang);
-        let structural = structural::is_structural(block, lang, &src);
-        let action = policy::decide(block, &analysis, structural, cfg);
-
+    for (block, action) in &plan {
         match action {
             Action::Keep => result.kept += 1,
             Action::Delete => {
                 result.deleted += 1;
                 if cfg.dry_run || cfg.verbose {
-                    println!(
+                    progress.print(format!(
                         "{}:{}: delete {} lines",
                         path.display(),
                         block.start_line + 1,
                         block.line_count()
-                    );
+                    ));
                 }
                 edits.push(rewrite::delete_edit(&src, block));
             }
@@ -173,13 +222,15 @@ fn process_file(path: &Path, lang: Language, llm: Option<&LlmClient>, cfg: &Conf
                 let context = first_nonblank_after(&lines, block.end_line);
                 let line = block.start_line + 1;
                 let client = llm.expect("reduce mode has an LLM");
-                let verdict = match client.summarize(&prose, &context, cfg.max_summary_words) {
+                let verdict = client.summarize(prose, &context, cfg.max_summary_words);
+                progress.tick();
+                let verdict = match verdict {
                     Ok(v) => v,
                     Err(err) => {
-                        eprintln!(
-                            "warning: {}:{line}: left unchanged, LLM failed ({err:#})",
+                        progress.warn(format!(
+                            "{}:{line}: left unchanged, LLM failed ({err:#})",
                             path.display()
-                        );
+                        ));
                         result.llm_errors += 1;
                         result.kept += 1;
                         continue;
@@ -189,18 +240,19 @@ fn process_file(path: &Path, lang: Language, llm: Option<&LlmClient>, cfg: &Conf
                     llm::Verdict::Delete => {
                         result.deleted += 1;
                         if cfg.dry_run || cfg.verbose {
-                            println!(
+                            progress.print(format!(
                                 "{}:{line}: delete {} lines (llm)",
                                 path.display(),
                                 block.line_count()
-                            );
+                            ));
                         }
                         edits.push(rewrite::delete_edit(&src, block));
                     }
                     llm::Verdict::Line(summary) => {
                         result.reduced += 1;
                         if cfg.dry_run || cfg.verbose {
-                            println!("{}:{line}: reduce -> {summary}", path.display());
+                            progress
+                                .print(format!("{}:{line}: reduce -> {summary}", path.display()));
                         }
                         edits.push(rewrite::reduce_edit(&src, block, lang, &summary));
                     }
@@ -219,7 +271,7 @@ fn process_file(path: &Path, lang: Language, llm: Option<&LlmClient>, cfg: &Conf
         if !cfg.dry_run
             && let Err(err) = std::fs::write(path, &new_src)
         {
-            eprintln!("warning: failed to write {}: {err}", path.display());
+            progress.warn(format!("failed to write {}: {err}", path.display()));
             result.changed = false;
         }
     }

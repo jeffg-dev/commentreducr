@@ -18,7 +18,9 @@ commentreducr <path> --delete    # remove all non-structural comments
 commentreducr <path> --reduce    # summarize dense prose blocks to one line (needs an LLM)
 ```
 
-`--delete --dry-run` counts without writing. `--reduce` fails if the LLM is unreachable.
+`--delete --dry-run` counts without writing. `--reduce` fails if the LLM is unreachable;
+otherwise it scans first, then shows progress (percent, blocks, files, time left, token
+counts and throughput) on stderr and prints token totals at the end.
 
 ## LLM for `--reduce`
 

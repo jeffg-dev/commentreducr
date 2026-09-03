@@ -1,7 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use commentreducr::{Config, Mode, run};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+const DEFAULT_ENDPOINT: &str = "http://localhost:8000/v1";
+const DEFAULT_MODEL: &str = "gemma-4-e2b-it-4bit";
 
 /// Delete or reduce comments in git-tracked Python and JS/TS source files.
 #[derive(Parser, Debug)]
@@ -23,28 +26,24 @@ struct Cli {
     #[arg(long)]
     delete: bool,
 
-    /// OpenAI-compatible base URL for --reduce.
-    #[arg(
-        long,
-        env = "COMMENTREDUCR_ENDPOINT",
-        default_value = "http://localhost:8000/v1"
-    )]
-    endpoint: String,
+    /// Config file (TOML with endpoint / model / api_key).
+    #[arg(long, value_name = "FILE", default_value_os_t = default_config_path())]
+    config: PathBuf,
+
+    /// OpenAI-compatible base URL for --reduce [default: http://localhost:8000/v1].
+    #[arg(long)]
+    endpoint: Option<String>,
 
     /// Disable the LLM; use extractive summaries only.
     #[arg(long)]
     no_llm: bool,
 
-    /// Model name sent to the endpoint. The prompt is tuned for Gemma 4 E2B.
-    #[arg(
-        long,
-        env = "COMMENTREDUCR_MODEL",
-        default_value = "gemma-4-e2b-it-4bit"
-    )]
-    model: String,
+    /// Model name; the prompt is tuned for Gemma 4 E2B [default: gemma-4-e2b-it-4bit].
+    #[arg(long)]
+    model: Option<String>,
 
-    /// API key, if the endpoint needs one (falls back to OPENAI_API_KEY).
-    #[arg(long, env = "COMMENTREDUCR_API_KEY", hide_env_values = true)]
+    /// API key, if the endpoint needs one.
+    #[arg(long)]
     api_key: Option<String>,
 
     /// Max in-flight LLM requests.
@@ -71,9 +70,39 @@ struct Cli {
     verbose: bool,
 }
 
+/// Optional settings from the config file; flags override these.
+#[derive(serde::Deserialize, Default)]
+struct FileConfig {
+    endpoint: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+}
+
+fn default_config_path() -> PathBuf {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .unwrap_or_default();
+    base.join("commentreducr").join("config.toml")
+}
+
+/// A missing file is fine (all defaults); a present but malformed one is an error.
+fn load_file_config(path: &Path) -> Result<FileConfig> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => toml::from_str(&text).with_context(|| format!("bad config {}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(FileConfig::default()),
+        Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    let file = load_file_config(&cli.config)?;
+    let endpoint = cli
+        .endpoint
+        .or(file.endpoint)
+        .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
     let cfg = Config {
         mode: if cli.delete {
             Mode::Delete
@@ -86,10 +115,13 @@ async fn main() -> Result<()> {
         endpoint: if cli.no_llm || cli.delete {
             None
         } else {
-            Some(cli.endpoint)
+            Some(endpoint)
         },
-        model: cli.model,
-        api_key: cli.api_key.or_else(|| std::env::var("OPENAI_API_KEY").ok()),
+        model: cli
+            .model
+            .or(file.model)
+            .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+        api_key: cli.api_key.or(file.api_key),
         llm_concurrency: cli.concurrency,
         dry_run: cli.dry_run,
         verbose: cli.verbose,
@@ -108,4 +140,24 @@ async fn main() -> Result<()> {
         stats.llm_fallbacks
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_config_is_default_and_bad_config_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        assert!(load_file_config(&path).unwrap().model.is_none());
+        std::fs::write(&path, "model = \"m\"\napi_key = \"k\"\n").unwrap();
+        let c = load_file_config(&path).unwrap();
+        assert_eq!(
+            (c.model.as_deref(), c.api_key.as_deref(), c.endpoint),
+            (Some("m"), Some("k"), None)
+        );
+        std::fs::write(&path, "model = ").unwrap();
+        assert!(load_file_config(&path).is_err());
+    }
 }

@@ -143,7 +143,7 @@ pub fn reduce_edit(src: &str, block: &CommentBlock, lang: Language, summary: &st
 /// Apply non-overlapping edits (any order) and return the new source.
 pub fn apply(src: &str, edits: Vec<Edit>) -> String {
     let mut edits = edits;
-    edits.sort_by(|a, b| b.start.cmp(&a.start));
+    edits.sort_by_key(|e| std::cmp::Reverse(e.start));
 
     debug_assert!(
         edits.windows(2).all(|w| w[0].start >= w[1].end),

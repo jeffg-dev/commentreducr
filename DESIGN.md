@@ -132,7 +132,10 @@ line at 80 chars.
 ## LLM endpoint
 
 OpenAI-compatible `/v1/chat/completions`, default `http://localhost:8000/v1`, model
-`gemma-4-e2b-it-4bit` (oMLX). Tested: `temperature: 0`, `max_tokens: 60`, system prompt
+`gemma-4-e2b-it-4bit` for comments and `gemma-4-26b-a4b-it-4bit` for docstrings (oMLX; the
+config key `docstrings_model` overrides the latter). Measured on the 58-row docstring set the
+two models tie on decisions (86% vs 88%) but E2B loses the gotcha in its rewrites, and the big
+model is ~4x slower per request; on the 120-row comment set the big model scores 94% vs 87%. Tested: `temperature: 0`, `max_tokens: 60`, system prompt
 "You condense multi-line source code comments into a single line. Reply with exactly one line
 of plain text, no more than N words, no quotes, no markdown, no preamble. Preserve identifiers
 and technical terms verbatim." Model emits no thinking by default. ~0.4s/request; the server

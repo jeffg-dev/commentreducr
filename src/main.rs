@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_ENDPOINT: &str = "http://localhost:8000/v1";
 const DEFAULT_MODEL: &str = "gemma-4-e2b-it-4bit";
+/// Docstring rewrites need the bigger model: E2B drops the gotcha a docstring exists to state.
+const DEFAULT_DOC_MODEL: &str = "gemma-4-26b-a4b-it-4bit";
 
 /// Delete or reduce comments (Python, JS/TS, YAML) or Python docstrings in git-tracked files.
 #[derive(Parser, Debug)]
@@ -53,7 +55,8 @@ struct Opts {
     #[arg(long)]
     endpoint: Option<String>,
 
-    /// Model name; the prompt is tuned for Gemma 4 E2B [default: gemma-4-e2b-it-4bit].
+    /// Model name [default: gemma-4-e2b-it-4bit for comments, gemma-4-26b-a4b-it-4bit for
+    /// docstrings].
     #[arg(long)]
     model: Option<String>,
 
@@ -91,6 +94,8 @@ struct Opts {
 struct FileConfig {
     endpoint: Option<String>,
     model: Option<String>,
+    /// Model for the docstrings subcommand; falls back to `model`, then the built-in default.
+    docstrings_model: Option<String>,
     api_key: Option<String>,
 }
 
@@ -138,8 +143,17 @@ fn main() -> Result<()> {
         model: opts
             .model
             .clone()
-            .or(file.model)
-            .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
+            .or(match target {
+                Target::Comments => file.model,
+                Target::Docstrings => file.docstrings_model.or(file.model),
+            })
+            .unwrap_or_else(|| {
+                match target {
+                    Target::Comments => DEFAULT_MODEL,
+                    Target::Docstrings => DEFAULT_DOC_MODEL,
+                }
+                .to_string()
+            }),
         api_key: opts.api_key.clone().or(file.api_key),
         llm_concurrency: opts.concurrency,
         dry_run: opts.dry_run,
@@ -201,8 +215,13 @@ mod tests {
         std::fs::write(&path, "model = \"m\"\napi_key = \"k\"\n").unwrap();
         let c = load_file_config(&path).unwrap();
         assert_eq!(
-            (c.model.as_deref(), c.api_key.as_deref(), c.endpoint),
-            (Some("m"), Some("k"), None)
+            (
+                c.model.as_deref(),
+                c.api_key.as_deref(),
+                c.endpoint,
+                c.docstrings_model
+            ),
+            (Some("m"), Some("k"), None, None)
         );
         std::fs::write(&path, "model = ").unwrap();
         assert!(load_file_config(&path).is_err());

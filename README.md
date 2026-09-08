@@ -41,17 +41,21 @@ issue. The path behind each numbered file goes to stderr so you can review it fi
 
 ## LLM for `--reduce`
 
-Any OpenAI-compatible chat endpoint. The prompt is tuned for
-[Gemma 4 E2B](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) (MLX); other
+Any OpenAI-compatible chat endpoint. `comments` defaults to
+[Gemma 4 E2B](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) (MLX), which the
+comment prompt is tuned for. `docstrings` defaults to
+[Gemma 4 26B A4B](https://huggingface.co/mlx-community/gemma-4-26b-a4b-it-4bit): about 4x
+slower per request, but E2B tends to drop the very gotcha a docstring exists to state. Other
 models run but are unmeasured. [oMLX](https://github.com/jundot/omlx) is a good server on
 Apple Silicon since it caches the prompt prefix.
 
 Config in `~/.config/commentreducr/config.toml` (or `--config FILE`). Flags override.
 
 ```toml
-endpoint = "http://localhost:8000/v1"   # default
-model = "gemma-4-e2b-it-4bit"           # default
-api_key = "sk-..."                       # optional
+endpoint = "http://localhost:8000/v1"        # default
+model = "gemma-4-e2b-it-4bit"                # default for comments (and docstrings if docstrings_model is unset)
+docstrings_model = "gemma-4-26b-a4b-it-4bit" # default for docstrings
+api_key = "sk-..."                            # optional
 ```
 
 ## Development

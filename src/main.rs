@@ -282,8 +282,15 @@ mod tests {
 
     #[test]
     fn missing_config_is_default_and_bad_config_errors() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("config.toml");
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "commentreducr-maintest-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
         assert!(load_file_config(&path).unwrap().model.is_none());
         std::fs::write(&path, "model = \"m\"\napi_key = \"k\"\nmin_lines = 2\n").unwrap();
         let c = load_file_config(&path).unwrap();
@@ -299,5 +306,6 @@ mod tests {
         );
         std::fs::write(&path, "model = ").unwrap();
         assert!(load_file_config(&path).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

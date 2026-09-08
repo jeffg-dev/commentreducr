@@ -682,6 +682,18 @@ def outer():
     }
 
     #[test]
+    fn test_prefixed_class_docstring_is_test() {
+        let src = "class TestFoo:\n    \"\"\"Holds a couple of test methods.\"\"\"\n\n    def test_one(self):\n        pass\n";
+        let docs = extract_docstrings(src, false).unwrap();
+        let foo = by_name(&docs, "TestFoo");
+        assert_eq!(foo.kind, DocKind::Class);
+        assert!(
+            foo.is_test,
+            "a Test-prefixed class docstring must be is_test"
+        );
+    }
+
+    #[test]
     fn cleandoc_dedents_and_trims_blank_lines() {
         let src = "def f():\n    \"\"\"First line.\n\n        Indented para.\n        More indented.\n\n    \"\"\"\n";
         let docs = extract_docstrings(src, false).unwrap();

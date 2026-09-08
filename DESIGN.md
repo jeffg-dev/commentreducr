@@ -29,8 +29,13 @@ JS/TS: `eslint-*`, `@ts-ignore/@ts-expect-error/@ts-nocheck/@ts-check`, `prettie
 `@preserve`, `/*!`, `/** JSDoc */` (any `/**` block), `/* webpack...*/` and `/* vite */` magic
 comments, `#region/#endregion`, `/// <reference`, `//# sourceMappingURL`, `//# sourceURL`,
 `@generated`, `TODO/FIXME/XXX/HACK/NOTE`.
-Both: license/copyright/SPDX text anywhere in the block; any block that starts at line 0 or 1
-of the file and mentions license/copyright.
+YAML: shebang, `yaml-language-server:`, `yamllint`, `prettier-ignore`, `noqa`, `checkov:skip`,
+`bridgecrew:skip`, `kics-scan`, `tflint-ignore`, `trivy:ignore`, `renovate:`, `ansible-lint`,
+`kube-linter`, `nosemgrep`, `ruleid:`, `pragma`, `@formatter:`, `region/endregion`, `language=`
+(IntelliJ injection), `TODO/FIXME/XXX/HACK/NOTE`.
+All: license/copyright/SPDX text anywhere in the block; any block that starts at line 0 or 1
+of the file and mentions license/copyright; editor modelines anywhere in the comment
+(`vim:`/`vi:`/`ex:` followed by `set`/`settings`, or an Emacs `-*- ... -*-` line).
 
 ## LLM verdict protocol
 

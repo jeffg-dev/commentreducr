@@ -7,6 +7,7 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Tsx,
+    Yaml,
 }
 
 impl Language {
@@ -16,6 +17,7 @@ impl Language {
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "mts" | "cts" => Some(Language::TypeScript),
             "tsx" => Some(Language::Tsx),
+            "yml" | "yaml" => Some(Language::Yaml),
             _ => None,
         }
     }
@@ -23,7 +25,7 @@ impl Language {
     /// Prefix used when emitting a single-line comment.
     pub fn line_prefix(self) -> &'static str {
         match self {
-            Language::Python => "#",
+            Language::Python | Language::Yaml => "#",
             _ => "//",
         }
     }

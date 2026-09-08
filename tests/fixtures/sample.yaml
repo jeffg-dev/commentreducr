@@ -1,0 +1,39 @@
+# Copyright 2024 Example Corp. Licensed under the MIT License.
+# SPDX-License-Identifier: MIT
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
+name: sample-pipeline
+version: 1
+
+# This function walks the list of samples and computes a running mean and
+# a running variance using a numerically stable single-pass algorithm so
+# that we never have to keep the whole sample list around in memory. It
+# is deliberately written without any external dependencies so that it
+# can be dropped into any small config without needing a templating engine.
+stats:
+  marker: "# not a comment"
+  weird: a#b
+  # TODO: keep me
+  # yamllint disable-line rule:line-length
+  count: 5  # noqa
+
+defaults: &defaults
+  retries: 3
+  timeout: 30
+
+jobs:
+  build:
+    <<: *defaults
+    divisor: 2  # trailing remark about the divisor
+    run: |
+      echo "starting build"
+      # not a comment
+      exit 0
+
+# init
+extra: true
+---
+second_doc: true
+values:
+  - 1
+  - 2

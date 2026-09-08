@@ -145,19 +145,20 @@ pub fn reduce_edit(src: &str, block: &CommentBlock, lang: Language, summary: &st
     }
 }
 
-/// Apply non-overlapping edits (any order) and return the new source.
+/// Apply edits (any order) and return the new source. Two deletions may claim the same bytes: a
+/// block that swallows the blank line after it and a block at EOF that walks back over the
+/// terminator before it. Overlaps are clamped so the shared bytes are removed once.
 pub fn apply(src: &str, edits: Vec<Edit>) -> String {
     let mut edits = edits;
     edits.sort_by_key(|e| std::cmp::Reverse(e.start));
 
-    debug_assert!(
-        edits.windows(2).all(|w| w[0].start >= w[1].end),
-        "overlapping edits"
-    );
-
     let mut out = src.to_string();
+    let mut floor = src.len();
     for edit in &edits {
-        out.replace_range(edit.start..edit.end, &edit.replacement);
+        let end = edit.end.min(floor);
+        let start = edit.start.min(end);
+        out.replace_range(start..end, &edit.replacement);
+        floor = start;
     }
     out
 }
@@ -225,6 +226,21 @@ mod tests {
             delete_edit(src, &block(src, s2, src.len(), false, false)),
         ];
         assert_eq!(apply(src, edits), "let a = 1;\nlet b = 2;");
+    }
+
+    #[test]
+    fn overlapping_deletions_at_eof_do_not_panic() {
+        // The first block swallows the blank line after it; the last block, at EOF without a
+        // terminator, walks back over the terminator before it. Both edits claim byte 15.
+        let src = "a\n\n# one\n# two\n\n# three";
+        let s1 = src.find("# one").unwrap();
+        let e1 = src.find("# two").unwrap() + "# two".len();
+        let s2 = src.find("# three").unwrap();
+        let edits = vec![
+            delete_edit(src, &block(src, s1, e1, true, false)),
+            delete_edit(src, &block(src, s2, src.len(), true, false)),
+        ];
+        assert_eq!(apply(src, edits), "a\n\n");
     }
 
     #[test]

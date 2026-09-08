@@ -88,10 +88,17 @@ when its file is.
 The user's comment philosophy: a comment earns its place only when it says something the code
 cannot — a surprise, a danger, a caution, a workaround for an external quirk. Everything else
 (narration, history, tickets, descriptions of other code, rationale evident from the code,
-library education, commented-out code) should go. So the model does not "summarize": it replies
-either `DELETE` or one terse line (<= max_words). `llm::Verdict` carries that; reduce mode deletes
-the block on `DELETE`. The system prompt states the rubric and seven few-shot demos (both
-languages, majority DELETE) are sent as prior user/assistant turns. Only blocks that pass the
+library education, commented-out code) should go. One flavor gets its own class (D4) because it
+is a hygiene problem, not just noise: a comment that explains how *other* code uses, expects,
+mirrors or must stay in sync with this code ("module X expects this shape", "same as in Y()",
+"called from the scheduler", "see Z for details") leaks the caller into the callee and goes stale
+the moment either side moves. Those are deleted; when one wraps a real hazard, the kept line
+restates the hazard in this code's own terms and names no other module, file or caller. A generic
+precondition on any caller ("call flush() before close()", "caller must hold the lock") is a
+contract, not a leak. The docstring prompt applies the same rule. So the model does not
+"summarize": it replies either `DELETE` or one terse line (<= max_words). `llm::Verdict` carries
+that; reduce mode deletes the block on `DELETE`. The system prompt states the rubric and sixteen
+few-shot demos (both languages, majority DELETE) are sent as prior user/assistant turns. Only blocks that pass the
 policy gate (own-line, >= min_lines prose lines, >= min_density words/line, not code-like) reach
 the model; shorter blocks are kept untouched. Reduce mode requires the LLM: `LlmClient::check`
 runs before any file is touched. There is no extractive fallback: if a call fails mid-run the
@@ -118,9 +125,10 @@ DELETE precision/recall, and every mismatch — use them to iterate on the promp
 ## Token budget and prefix caching
 
 oMLX prefix-caches in 512-token blocks: cached tokens per request = the constant prefix rounded
-down to a multiple of 512. The constant prefix (system prompt + 12 demos + "Comment:") is
-tuned to ~1590 tokens so 1536 are cached and only ~55 tokens of prefix plus the comment
-(~100 tokens) are prefilled per request. Completions average ~6 tokens because a delete verdict
+down to a multiple of 512. The comment prefix (system prompt + 16 demos + "Comment:") is
+tuned to ~2096 tokens so 2048 are cached and only ~50 tokens of prefix plus the comment
+(~100 tokens) are prefilled per request; the docstring prefix (system prompt + 12 demos) sits at
+~2730 so 2560 are cached. Completions average ~6 tokens because a delete verdict
 is a two-character class code. Measure with `--eval` (prints per-request prompt/cached/completion
 tokens); a one-row dataset with a tiny comment gives the prefix size directly.
 

@@ -127,13 +127,13 @@ in bloat, the label keeps only that fact, terse, no story.
 
 ### Label distribution
 
-58 rows: 35 `DELETE` (60%), 23 kept.
+58 rows: 36 `DELETE` (62%), 22 kept.
 
 | kind       | is_test | rows | kept | DELETE |
 |------------|:-------:|-----:|-----:|-------:|
 | module     | false   |    8 |    3 |      5 |
 | module     | true    |   10 |    4 |      6 |
-| class      | false   |   10 |    4 |      6 |
+| class      | false   |   10 |    3 |      7 |
 | function   | false   |   16 |    6 |     10 |
 | function   | true    |   14 |    6 |      8 |
 

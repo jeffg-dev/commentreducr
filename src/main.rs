@@ -7,6 +7,16 @@ const DEFAULT_ENDPOINT: &str = "http://localhost:8000/v1";
 const DEFAULT_MODEL: &str = "gemma-4-e2b-it-4bit";
 /// Docstring rewrites need the bigger model: E2B drops the gotcha a docstring exists to state.
 const DEFAULT_DOC_MODEL: &str = "gemma-4-26b-a4b-it-4bit";
+const DEFAULT_WORKERS: usize = 8;
+const DEFAULT_MIN_LINES: usize = 4;
+const DEFAULT_MIN_DENSITY: f64 = 5.0;
+const DEFAULT_MAX_WORDS: usize = 20;
+
+const AFTER_HELP: &str =
+    "Advanced options: --help. Settings file: ~/.config/commentreducr/config.toml";
+const AFTER_LONG_HELP: &str = "endpoint, model, docstrings_model, api_key, workers, min_lines, \
+                               min_density and max_words can also be set in \
+                               ~/.config/commentreducr/config.toml; flags win.";
 
 /// Delete or reduce comments (Python, JS/TS, YAML) or Python docstrings in git-tracked files.
 #[derive(Parser, Debug)]
@@ -19,74 +29,113 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Comments in Python, JS/TS and YAML files
+    #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
     Comments(Opts),
     /// Python docstrings (module, class, function)
+    #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
     Docstrings(Opts),
 }
 
+/// Field order is help order: common flags, then the "LLM" heading, then "Advanced" (long
+/// help only). Numeric flags are `Option` so the config file can supply them when absent.
 #[derive(clap::Args, Debug)]
 struct Opts {
-    /// Directory to process (git-tracked files under it, recursively).
-    #[arg(required_unless_present = "eval")]
+    /// Directory or file to process [default: .]
     path: Option<PathBuf>,
-
-    /// Evaluate the LLM prompt against a labeled JSONL dataset instead of processing files.
-    #[arg(long, value_name = "JSONL")]
-    eval: Option<PathBuf>,
-
-    /// Parse only, no LLM, no writes: print a redacted report of every file that fails to parse
-    /// (node kinds and line shapes, no paths or code) for pasting into a bug report.
-    #[arg(long, conflicts_with = "eval")]
-    diagnose: bool,
-
-    /// Reduce large dense comment/docstring blocks to one line/short text (default).
-    #[arg(long, conflicts_with = "delete")]
-    reduce: bool,
 
     /// Delete all non-structural comments/docstrings.
     #[arg(long)]
     delete: bool,
 
-    /// Config file (TOML with endpoint / model / api_key).
-    #[arg(long, value_name = "FILE", default_value_os_t = default_config_path())]
-    config: PathBuf,
+    /// Reduce large dense blocks to one line/short text via the LLM (default).
+    #[arg(long, conflicts_with = "delete")]
+    reduce: bool,
 
-    /// OpenAI-compatible base URL for --reduce [default: http://localhost:8000/v1].
-    #[arg(long)]
-    endpoint: Option<String>,
-
-    /// Model name [default: gemma-4-e2b-it-4bit for comments, gemma-4-26b-a4b-it-4bit for
-    /// docstrings].
-    #[arg(long)]
-    model: Option<String>,
-
-    /// API key, if the endpoint needs one.
-    #[arg(long)]
-    api_key: Option<String>,
-
-    /// Worker threads (also the max in-flight LLM requests).
-    #[arg(long, default_value_t = 8)]
-    concurrency: usize,
-
-    /// Minimum prose lines (comments) or non-blank docstring lines (docstrings) for a block to
-    /// be reduced.
-    #[arg(long, default_value_t = 4)]
-    min_lines: usize,
-
-    /// (comments only) Minimum average words per line for a block to be reduced.
-    #[arg(long, default_value_t = 5.0)]
-    min_density: f64,
-
-    /// (comments only) Target max words in a summary.
-    #[arg(long, default_value_t = 20)]
-    max_words: usize,
-
-    /// With --delete only: count what would change without writing.
+    /// With --delete only: report what would change without writing.
     #[arg(long, requires = "delete")]
     dry_run: bool,
 
+    /// Worker threads (and max in-flight LLM requests) [default: 8]
+    #[arg(short = 'n', long, alias = "concurrency", value_name = "N")]
+    workers: Option<usize>,
+
+    /// Print every changed block, not just per-file summaries.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Config file [default: ~/.config/commentreducr/config.toml]
+    #[arg(
+        long,
+        value_name = "FILE",
+        default_value_os_t = default_config_path(),
+        hide_default_value = true
+    )]
+    config: PathBuf,
+
+    /// OpenAI-compatible base URL [default: http://localhost:8000/v1]
+    #[arg(long, help_heading = "LLM")]
+    endpoint: Option<String>,
+
+    /// Model name
+    #[arg(
+        long,
+        help_heading = "LLM",
+        long_help = "Model name [default: gemma-4-e2b-it-4bit for comments, \
+                      gemma-4-26b-a4b-it-4bit for docstrings]"
+    )]
+    model: Option<String>,
+
+    /// API key, if the endpoint needs one
+    #[arg(long, help_heading = "LLM")]
+    api_key: Option<String>,
+
+    /// Minimum lines in a block before it is reduced [default: 4]
+    #[arg(
+        long,
+        value_name = "N",
+        help_heading = "Advanced",
+        hide_short_help = true
+    )]
+    min_lines: Option<usize>,
+
+    /// (comments only) Minimum average words per line [default: 5]
+    #[arg(
+        long,
+        value_name = "N",
+        help_heading = "Advanced",
+        hide_short_help = true
+    )]
+    min_density: Option<f64>,
+
+    /// (comments only) Target max words in a summary [default: 20]
+    #[arg(
+        long,
+        value_name = "N",
+        help_heading = "Advanced",
+        hide_short_help = true
+    )]
+    max_words: Option<usize>,
+
+    /// Parse only, no LLM, no writes: report files that fail to parse
+    #[arg(
+        long,
+        conflicts_with = "eval",
+        help_heading = "Advanced",
+        hide_short_help = true,
+        long_help = "Parse only, no LLM, no writes: print a redacted report of every file that \
+                      fails to parse (node kinds and line shapes, no paths or code) for pasting \
+                      into a bug report"
+    )]
+    diagnose: bool,
+
+    /// Score the LLM prompt against a labeled JSONL dataset instead of processing files
+    #[arg(
+        long,
+        value_name = "JSONL",
+        help_heading = "Advanced",
+        hide_short_help = true
+    )]
+    eval: Option<PathBuf>,
 }
 
 /// Optional settings from the config file; flags override these.
@@ -97,6 +146,10 @@ struct FileConfig {
     /// Model for the docstrings subcommand; falls back to `model`, then the built-in default.
     docstrings_model: Option<String>,
     api_key: Option<String>,
+    workers: Option<usize>,
+    min_lines: Option<usize>,
+    min_density: Option<f64>,
+    max_words: Option<usize>,
 }
 
 fn default_config_path() -> PathBuf {
@@ -140,9 +193,18 @@ fn main() -> Result<()> {
         } else {
             Mode::Reduce
         },
-        min_lines: opts.min_lines,
-        min_density: opts.min_density,
-        max_summary_words: opts.max_words,
+        min_lines: opts
+            .min_lines
+            .or(file.min_lines)
+            .unwrap_or(DEFAULT_MIN_LINES),
+        min_density: opts
+            .min_density
+            .or(file.min_density)
+            .unwrap_or(DEFAULT_MIN_DENSITY),
+        max_summary_words: opts
+            .max_words
+            .or(file.max_words)
+            .unwrap_or(DEFAULT_MAX_WORDS),
         endpoint: opts
             .endpoint
             .clone()
@@ -163,7 +225,7 @@ fn main() -> Result<()> {
                 .to_string()
             }),
         api_key: opts.api_key.clone().or(file.api_key),
-        llm_concurrency: opts.concurrency,
+        llm_concurrency: opts.workers.or(file.workers).unwrap_or(DEFAULT_WORKERS),
         dry_run: opts.dry_run,
         verbose: opts.verbose,
     };
@@ -173,7 +235,8 @@ fn main() -> Result<()> {
             Target::Docstrings => commentreducr::eval::run_docstrings(dataset, &cfg),
         };
     }
-    let path = opts.path.as_deref().unwrap();
+    let default_path = PathBuf::from(".");
+    let path = opts.path.as_deref().unwrap_or(&default_path);
     if opts.diagnose {
         println!("commentreducr {}", env!("CARGO_PKG_VERSION"));
         let bad = commentreducr::diagnose(path, target)?;
@@ -189,13 +252,15 @@ fn main() -> Result<()> {
         Target::Docstrings => "docstrings",
     };
     eprintln!(
-        "{} files scanned, {} changed, {} skipped; {noun}: {} kept, {} deleted, {} reduced, {} LLM failures",
+        "{} files scanned, {} changed, {} skipped; {noun}: {} kept, {} deleted ({} lines), {} reduced ({} lines saved), {} LLM failures",
         stats.files_scanned,
         stats.files_changed,
         stats.files_skipped,
         stats.comments_kept,
         stats.comments_deleted,
+        stats.lines_deleted,
         stats.comments_reduced,
+        stats.lines_reduced,
         stats.llm_errors,
     );
     if let Some(t) = stats.tokens {
@@ -220,16 +285,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         assert!(load_file_config(&path).unwrap().model.is_none());
-        std::fs::write(&path, "model = \"m\"\napi_key = \"k\"\n").unwrap();
+        std::fs::write(&path, "model = \"m\"\napi_key = \"k\"\nmin_lines = 2\n").unwrap();
         let c = load_file_config(&path).unwrap();
         assert_eq!(
             (
                 c.model.as_deref(),
                 c.api_key.as_deref(),
                 c.endpoint,
-                c.docstrings_model
+                c.docstrings_model,
+                c.min_lines
             ),
-            (Some("m"), Some("k"), None, None)
+            (Some("m"), Some("k"), None, None, Some(2))
         );
         std::fs::write(&path, "model = ").unwrap();
         assert!(load_file_config(&path).is_err());

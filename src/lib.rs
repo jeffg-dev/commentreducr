@@ -27,6 +27,12 @@ pub struct Stats {
     pub comments_kept: usize,
     pub comments_deleted: usize,
     pub comments_reduced: usize,
+    /// Source lines removed by Delete actions (comment block line count, or docstring
+    /// `end_line - start_line + 1`).
+    pub lines_deleted: usize,
+    /// Net source lines saved by Reduce actions (original block/docstring line count minus the
+    /// replacement's line count, clamped at 0).
+    pub lines_reduced: usize,
     /// Files skipped because they could not be read, parsed, or processed (bug caught).
     pub files_skipped: usize,
     /// Blocks left unchanged because the LLM call failed.
@@ -45,6 +51,8 @@ impl Stats {
         self.comments_kept += r.kept;
         self.comments_deleted += r.deleted;
         self.comments_reduced += r.reduced;
+        self.lines_deleted += r.lines_deleted;
+        self.lines_reduced += r.lines_reduced;
         self.files_skipped += r.skipped as usize;
         self.llm_errors += r.llm_errors;
     }
@@ -61,15 +69,43 @@ struct FileResult {
     kept: usize,
     deleted: usize,
     reduced: usize,
+    lines_deleted: usize,
+    lines_reduced: usize,
     skipped: bool,
     llm_errors: usize,
+}
+
+impl FileResult {
+    /// One-line per-file summary of deletes/reduces for `path`, e.g.
+    /// `src/foo.py: 3 deleted (45 lines), 1 reduced (12 lines saved)`. Zero parts are omitted;
+    /// `None` if the file had neither a delete nor a reduce.
+    fn summary_line(&self, path: &Path) -> Option<String> {
+        if self.deleted == 0 && self.reduced == 0 {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if self.deleted > 0 {
+            parts.push(format!(
+                "{} deleted ({} lines)",
+                self.deleted, self.lines_deleted
+            ));
+        }
+        if self.reduced > 0 {
+            parts.push(format!(
+                "{} reduced ({} lines saved)",
+                self.reduced, self.lines_reduced
+            ));
+        }
+        Some(format!("{}: {}", path.display(), parts.join(", ")))
+    }
 }
 
 /// Process every tracked source file under `root`.
 /// Per file: read (skip non-UTF-8 with a warning), extract_comments -> group_blocks, for each block
 /// analyze + is_structural + decide; Reduce actions call the LLM with bounded concurrency; build
-/// edits; rewrite::apply; write back only if changed (unless dry_run, in which case print a
-/// per-file summary of changes).
+/// edits; rewrite::apply; write back only if changed (skipped when `cfg.dry_run`). Either way, a
+/// one-line per-file summary of deletes/reduces is printed to stdout (see `write_edits`), and
+/// per-block detail lines too when `cfg.verbose`.
 /// In reduce mode the endpoint is checked before any file is touched. After that the run is
 /// best-effort: a failed LLM call leaves that block unchanged, and a panic while processing a file
 /// (a bug) skips that file. Both are warned about and counted in `Stats`; nothing is written for a
@@ -250,7 +286,8 @@ fn process_file(
             Action::Keep => result.kept += 1,
             Action::Delete => {
                 result.deleted += 1;
-                if cfg.dry_run || cfg.verbose {
+                result.lines_deleted += block.line_count();
+                if cfg.verbose {
                     progress.print(format!(
                         "{}:{}: delete {} lines",
                         path.display(),
@@ -281,7 +318,8 @@ fn process_file(
                 match verdict {
                     llm::Verdict::Delete => {
                         result.deleted += 1;
-                        if cfg.dry_run || cfg.verbose {
+                        result.lines_deleted += block.line_count();
+                        if cfg.verbose {
                             progress.print(format!(
                                 "{}:{line}: delete {} lines (llm)",
                                 path.display(),
@@ -292,7 +330,8 @@ fn process_file(
                     }
                     llm::Verdict::Line(summary) => {
                         result.reduced += 1;
-                        if cfg.dry_run || cfg.verbose {
+                        result.lines_reduced += block.line_count().saturating_sub(1);
+                        if cfg.verbose {
                             progress
                                 .print(format!("{}:{line}: reduce -> {summary}", path.display()));
                         }
@@ -307,8 +346,10 @@ fn process_file(
     result
 }
 
-/// Shared tail of `process_file`/`process_docstrings`: apply the collected edits and, unless
-/// `dry_run`, write the file back if anything actually changed. No-op when `edits` is empty.
+/// Shared tail of `process_file`/`process_docstrings`: print the per-file summary line (see
+/// `FileResult::summary_line`) whenever the file had at least one delete or reduce, then apply
+/// the collected edits and, unless `dry_run`, write the file back if anything actually changed.
+/// No-op (beyond the summary line) when `edits` is empty.
 fn write_edits(
     path: &Path,
     src: &str,
@@ -317,6 +358,9 @@ fn write_edits(
     progress: &Progress,
     result: &mut FileResult,
 ) {
+    if let Some(line) = result.summary_line(path) {
+        progress.print(line);
+    }
     if edits.is_empty() {
         return;
     }
@@ -438,7 +482,8 @@ fn process_docstrings(
             DocAction::Keep => result.kept += 1,
             DocAction::Delete(edit) => {
                 result.deleted += 1;
-                if cfg.dry_run || cfg.verbose {
+                result.lines_deleted += doc.end_line - doc.start_line + 1;
+                if cfg.verbose {
                     progress.print(format!(
                         "{}:{}: delete docstring ({} lines)",
                         path.display(),
@@ -469,7 +514,8 @@ fn process_docstrings(
                     DocVerdict::Delete => match docstring::delete_edit(&src, &doc) {
                         Some(edit) => {
                             result.deleted += 1;
-                            if cfg.dry_run || cfg.verbose {
+                            result.lines_deleted += doc.end_line - doc.start_line + 1;
+                            if cfg.verbose {
                                 progress.print(format!(
                                     "{}:{line}: delete docstring ({} lines)",
                                     path.display(),
@@ -483,7 +529,9 @@ fn process_docstrings(
                     DocVerdict::Text(t) => match docstring::replace_edit(&src, &doc, &t) {
                         Some(edit) => {
                             result.reduced += 1;
-                            if cfg.dry_run || cfg.verbose {
+                            let original = doc.end_line - doc.start_line + 1;
+                            result.lines_reduced += original.saturating_sub(t.lines().count());
+                            if cfg.verbose {
                                 progress.print(format!(
                                     "{}:{line}: reduce docstring -> {}",
                                     path.display(),
@@ -530,4 +578,49 @@ fn first_nonblank_after(lines: &[&str], end_line: usize) -> String {
         .find(|l| !l.is_empty())
         .map(|l| l.chars().take(120).collect())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_result_summary_line_omits_zero_parts() {
+        let path = Path::new("src/foo.py");
+
+        let nothing = FileResult::default();
+        assert_eq!(nothing.summary_line(path), None);
+
+        let deleted_only = FileResult {
+            deleted: 3,
+            lines_deleted: 45,
+            ..Default::default()
+        };
+        assert_eq!(
+            deleted_only.summary_line(path).as_deref(),
+            Some("src/foo.py: 3 deleted (45 lines)")
+        );
+
+        let both = FileResult {
+            deleted: 3,
+            lines_deleted: 45,
+            reduced: 1,
+            lines_reduced: 12,
+            ..Default::default()
+        };
+        assert_eq!(
+            both.summary_line(path).as_deref(),
+            Some("src/foo.py: 3 deleted (45 lines), 1 reduced (12 lines saved)")
+        );
+
+        let reduced_only = FileResult {
+            reduced: 1,
+            lines_reduced: 12,
+            ..Default::default()
+        };
+        assert_eq!(
+            reduced_only.summary_line(path).as_deref(),
+            Some("src/foo.py: 1 reduced (12 lines saved)")
+        );
+    }
 }

@@ -5,11 +5,111 @@
 //!
 //! `docstrings` subcommand: same shape, against tests/fixtures/test_sample.py (plus sample.py,
 //! which is a Python file but not part of the docstrings test's own fixture set).
-use assert_cmd::Command;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+/// Minimal RAII temp directory: a unique path under the system temp dir, created eagerly and
+/// removed (best-effort) on drop. Stands in for `tempfile::TempDir` without the dependency.
+struct TempDir {
+    path: PathBuf,
+}
+
+static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+impl TempDir {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "commentreducr-test-{}-{}",
+            std::process::id(),
+            TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        TempDir { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Captured output of a finished child process, with small chainable assertions used in place of
+/// `assert_cmd`/`predicates`. Each assertion panics (with full stdout/stderr for context) on
+/// mismatch and returns `self`, so calls chain like the old `.assert()...` calls did.
+struct Ran {
+    status: ExitStatus,
+    stdout: String,
+    stderr: String,
+}
+
+fn run(cmd: &mut Command) -> Ran {
+    let output = cmd.output().expect("failed to run command");
+    Ran {
+        status: output.status,
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
+}
+
+impl Ran {
+    fn fail(&self, msg: &str) -> ! {
+        panic!(
+            "{msg}\nstatus: {:?}\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            self.status, self.stdout, self.stderr
+        );
+    }
+
+    fn success(self) -> Self {
+        if !self.status.success() {
+            self.fail("expected success");
+        }
+        self
+    }
+
+    fn failure(self) -> Self {
+        if self.status.success() {
+            self.fail("expected failure");
+        }
+        self
+    }
+
+    fn code(self, n: i32) -> Self {
+        if self.status.code() != Some(n) {
+            let msg = format!("expected exit code {n}, got {:?}", self.status.code());
+            self.fail(&msg);
+        }
+        self
+    }
+
+    fn stdout_contains(self, s: &str) -> Self {
+        if !self.stdout.contains(s) {
+            let msg = format!("expected stdout to contain {s:?}");
+            self.fail(&msg);
+        }
+        self
+    }
+
+    fn stderr_contains(self, s: &str) -> Self {
+        if !self.stderr.contains(s) {
+            let msg = format!("expected stderr to contain {s:?}");
+            self.fail(&msg);
+        }
+        self
+    }
+}
+
+fn commentreducr() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_commentreducr"))
+}
 
 struct Fixture {
     name: &'static str,
@@ -93,7 +193,7 @@ const FIXTURES: &[Fixture] = &[
 ];
 
 fn git(dir: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
+    let status = Command::new("git")
         .args(args)
         .current_dir(dir)
         .status()
@@ -122,7 +222,7 @@ fn commit_all(dir: &Path) {
 }
 
 /// Copies tests/fixtures into a fresh temp dir and commits them, so `git ls-files` sees them.
-fn setup_repo() -> tempfile::TempDir {
+fn setup_repo() -> TempDir {
     let dir = setup_repo_uncommitted();
     commit_all(dir.path());
     dir
@@ -131,7 +231,7 @@ fn setup_repo() -> tempfile::TempDir {
 /// Like `setup_repo`, plus tests/fixtures/test_sample.py: a pytest-shaped Python module used by
 /// the docstrings tests below. It is deliberately kept out of `FIXTURES` (and so out of the
 /// generic comment assertions above) so those tests' file counts stay exactly as before.
-fn setup_docstrings_repo() -> tempfile::TempDir {
+fn setup_docstrings_repo() -> TempDir {
     let dir = setup_repo_uncommitted();
     std::fs::copy(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/test_sample.py"),
@@ -145,8 +245,8 @@ fn setup_docstrings_repo() -> tempfile::TempDir {
 /// A temp repo with exactly tests/fixtures/test_sample.py, sample.py and sample.ts, for the
 /// reduce-mode end-to-end test below (kept small so the mock LLM's expected request count is
 /// exact and easy to reason about).
-fn setup_reduce_repo() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn setup_reduce_repo() -> TempDir {
+    let dir = TempDir::new();
     let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     for name in ["test_sample.py", "sample.py", "sample.ts"] {
         std::fs::copy(fixtures_dir.join(name), dir.path().join(name)).unwrap();
@@ -214,8 +314,8 @@ fn mock_llm(
     format!("http://127.0.0.1:{port}/v1")
 }
 
-fn setup_repo_uncommitted() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+fn setup_repo_uncommitted() -> TempDir {
+    let dir = TempDir::new();
     let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     for f in FIXTURES {
         std::fs::copy(fixtures_dir.join(f.name), dir.path().join(f.name)).unwrap();
@@ -228,23 +328,18 @@ fn read(dir: &Path, name: &str) -> String {
 }
 
 fn python3_available() -> bool {
-    std::process::Command::new("python3")
-        .arg("--version")
-        .output()
-        .is_ok()
+    Command::new("python3").arg("--version").output().is_ok()
 }
 
 #[test]
 fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
     let dir = setup_repo();
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
-        .arg("--delete")
-        .assert()
-        .success();
+        .arg("--delete"))
+    .success();
 
     for f in FIXTURES {
         let content = read(dir.path(), f.name);
@@ -270,13 +365,11 @@ fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
 
     // Idempotent: running --delete again changes nothing.
     let before: Vec<String> = FIXTURES.iter().map(|f| read(dir.path(), f.name)).collect();
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
-        .arg("--delete")
-        .assert()
-        .success();
+        .arg("--delete"))
+    .success();
     for (f, before) in FIXTURES.iter().zip(before) {
         assert_eq!(
             read(dir.path(), f.name),
@@ -296,18 +389,14 @@ fn delete_dry_run_counts_but_writes_nothing() {
     let dir = setup_repo();
     let before = snapshot(dir.path());
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
         .arg("--delete")
-        .arg("--dry-run")
-        .assert()
-        .success()
-        .stdout(predicates::str::contains(" deleted ("))
-        .stderr(predicates::str::contains(
-            "5 files scanned, 5 changed, 0 skipped",
-        ));
+        .arg("--dry-run"))
+    .success()
+    .stdout_contains(" deleted (")
+    .stderr_contains("5 files scanned, 5 changed, 0 skipped");
 
     assert_eq!(snapshot(dir.path()), before, "dry run modified files");
 }
@@ -316,23 +405,19 @@ fn delete_dry_run_counts_but_writes_nothing() {
 fn broken_file_is_skipped_and_others_still_processed() {
     let dir = setup_repo();
     std::fs::write(dir.path().join("bad.py"), b"# comment\ndef f(:\n  \xff\n").unwrap();
-    std::process::Command::new("git")
+    Command::new("git")
         .args(["add", "-A"])
         .current_dir(dir.path())
         .status()
         .unwrap();
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
-        .arg("--delete")
-        .assert()
-        .code(1)
-        .stderr(predicates::str::contains("warning: skipping"))
-        .stderr(predicates::str::contains(
-            "6 files scanned, 5 changed, 1 skipped",
-        ));
+        .arg("--delete"))
+    .code(1)
+    .stderr_contains("warning: skipping")
+    .stderr_contains("6 files scanned, 5 changed, 1 skipped");
 
     for f in FIXTURES {
         assert!(
@@ -346,14 +431,12 @@ fn broken_file_is_skipped_and_others_still_processed() {
 #[test]
 fn dry_run_requires_delete() {
     let dir = setup_repo();
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
-        .arg("--dry-run")
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains("--delete"));
+        .arg("--dry-run"))
+    .failure()
+    .stderr_contains("--delete");
 }
 
 #[test]
@@ -365,19 +448,15 @@ fn dry_run_with_explicit_reduce_is_also_rejected() {
     let dir = setup_repo();
     let before = snapshot(dir.path());
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
         .arg("--reduce")
         .arg("--dry-run")
         .arg("--endpoint")
-        .arg("http://127.0.0.1:1/v1")
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains(
-            "--dry-run only applies to --delete",
-        ));
+        .arg("http://127.0.0.1:1/v1"))
+    .failure()
+    .stderr_contains("--dry-run only applies to --delete");
 
     assert_eq!(snapshot(dir.path()), before, "rejected run modified files");
 }
@@ -387,20 +466,16 @@ fn reduce_fails_hard_when_llm_unreachable() {
     let dir = setup_repo();
     let before = snapshot(dir.path());
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
         .arg("--reduce")
         .arg("--config")
         .arg(dir.path().join("no-such-config.toml"))
         .arg("--endpoint")
-        .arg("http://127.0.0.1:1/v1")
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains(
-            "cannot reach LLM at http://127.0.0.1:1/v1",
-        ));
+        .arg("http://127.0.0.1:1/v1"))
+    .failure()
+    .stderr_contains("cannot reach LLM at http://127.0.0.1:1/v1");
 
     assert_eq!(snapshot(dir.path()), before, "failed reduce modified files");
 }
@@ -408,29 +483,23 @@ fn reduce_fails_hard_when_llm_unreachable() {
 #[test]
 fn missing_subcommand_fails_with_usage_error() {
     let dir = setup_repo();
-    Command::cargo_bin("commentreducr")
-        .unwrap()
-        .arg(dir.path())
-        .arg("--delete")
-        .assert()
+    run(commentreducr().arg(dir.path()).arg("--delete"))
         .failure()
-        .stderr(predicates::str::contains("subcommand"))
-        .stderr(predicates::str::contains("Usage: commentreducr <COMMAND>"));
+        .stderr_contains("subcommand")
+        .stderr_contains("Usage: commentreducr <COMMAND>");
 }
 
 #[test]
 fn docstrings_delete_removes_docstrings_and_is_idempotent() {
     let dir = setup_docstrings_repo();
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("docstrings")
         .arg(dir.path())
-        .arg("--delete")
-        .assert()
-        .success()
-        .stderr(predicates::str::contains("docstrings:"))
-        .stderr(predicates::str::contains("2 files scanned"));
+        .arg("--delete"))
+    .success()
+    .stderr_contains("docstrings:")
+    .stderr_contains("2 files scanned");
 
     let after = read(dir.path(), "test_sample.py");
 
@@ -481,7 +550,7 @@ fn docstrings_delete_removes_docstrings_and_is_idempotent() {
         "rewritten file has parse errors:\n{after}"
     );
     if python3_available() {
-        let status = std::process::Command::new("python3")
+        let status = Command::new("python3")
             .args(["-m", "py_compile"])
             .arg(dir.path().join("test_sample.py"))
             .status()
@@ -518,13 +587,11 @@ fn docstrings_delete_removes_docstrings_and_is_idempotent() {
         read(dir.path(), "test_sample.py"),
         read(dir.path(), "sample.py"),
     );
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("docstrings")
         .arg(dir.path())
-        .arg("--delete")
-        .assert()
-        .success();
+        .arg("--delete"))
+    .success();
     assert_eq!(
         read(dir.path(), "test_sample.py"),
         before.0,
@@ -542,16 +609,14 @@ fn docstrings_delete_dry_run_prints_and_writes_nothing() {
     let dir = setup_docstrings_repo();
     let before = read(dir.path(), "test_sample.py");
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("docstrings")
         .arg(dir.path())
         .arg("--delete")
-        .arg("--dry-run")
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("test_sample.py: "))
-        .stdout(predicates::str::contains(" deleted ("));
+        .arg("--dry-run"))
+    .success()
+    .stdout_contains("test_sample.py: ")
+    .stdout_contains(" deleted (");
 
     assert_eq!(
         read(dir.path(), "test_sample.py"),
@@ -565,20 +630,16 @@ fn docstrings_reduce_fails_hard_when_llm_unreachable() {
     let dir = setup_docstrings_repo();
     let before = read(dir.path(), "test_sample.py");
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("docstrings")
         .arg(dir.path())
         .arg("--reduce")
         .arg("--config")
         .arg(dir.path().join("no-such-config.toml"))
         .arg("--endpoint")
-        .arg("http://127.0.0.1:1/v1")
-        .assert()
-        .failure()
-        .stderr(predicates::str::contains(
-            "cannot reach LLM at http://127.0.0.1:1/v1",
-        ));
+        .arg("http://127.0.0.1:1/v1"))
+    .failure()
+    .stderr_contains("cannot reach LLM at http://127.0.0.1:1/v1");
 
     assert_eq!(
         read(dir.path(), "test_sample.py"),
@@ -592,13 +653,11 @@ fn comments_delete_leaves_docstrings_in_test_sample_intact() {
     let dir = setup_docstrings_repo();
     let before = read(dir.path(), "test_sample.py");
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
-        .arg("--delete")
-        .assert()
-        .success();
+        .arg("--delete"))
+    .success();
 
     let after = read(dir.path(), "test_sample.py");
     for survives in [
@@ -652,8 +711,7 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         8, // preflight + {module, helper_thing, test_short, test_dedup, TestThing, probe} + sample.py's module
     );
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("docstrings")
         .arg(dir.path())
         .arg("--reduce")
@@ -664,15 +722,12 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         .arg("--endpoint")
         .arg(&endpoint)
         .arg("--config")
-        .arg(&no_config)
-        .assert()
-        .code(1)
-        .stderr(predicates::str::contains(
-            "2 files scanned, 2 changed, 0 skipped",
-        ))
-        .stderr(predicates::str::contains("docstrings: 2 kept, 4 deleted ("))
-        .stderr(predicates::str::contains("lines), 2 reduced ("))
-        .stderr(predicates::str::contains("lines saved), 1 LLM failures"));
+        .arg(&no_config))
+    .code(1)
+    .stderr_contains("2 files scanned, 2 changed, 0 skipped")
+    .stderr_contains("docstrings: 2 kept, 4 deleted (")
+    .stderr_contains("lines), 2 reduced (")
+    .stderr_contains("lines saved), 1 LLM failures");
 
     let test_sample = read(dir.path(), "test_sample.py");
     // Module docstring: own_line, indent "" -- KEEP text spliced in with PEP 257 closing quotes
@@ -735,8 +790,7 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         3, // preflight + sample.py's block + sample.ts's block
     );
 
-    Command::cargo_bin("commentreducr")
-        .unwrap()
+    run(commentreducr()
         .arg("comments")
         .arg(dir.path())
         .arg("--reduce")
@@ -747,10 +801,9 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         .arg("--endpoint")
         .arg(&endpoint)
         .arg("--config")
-        .arg(&no_config)
-        .assert()
-        .success()
-        .stderr(predicates::str::contains("tokens: 3 requests,"));
+        .arg(&no_config))
+    .success()
+    .stderr_contains("tokens: 3 requests,");
 
     let sample_py = read(dir.path(), "sample.py");
     assert!(

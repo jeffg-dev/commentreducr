@@ -1,15 +1,29 @@
 use anyhow::{Context, Result};
-use clap::Parser;
-use commentreducr::{Config, Mode, run};
+use clap::{Parser, Subcommand};
+use commentreducr::{Config, Mode, Target, run};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_ENDPOINT: &str = "http://localhost:8000/v1";
 const DEFAULT_MODEL: &str = "gemma-4-e2b-it-4bit";
 
-/// Delete or reduce comments in git-tracked Python and JS/TS source files.
+/// Delete or reduce comments (Python, JS/TS, YAML) or Python docstrings in git-tracked files.
 #[derive(Parser, Debug)]
 #[command(name = "commentreducr", version)]
 struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Comments in Python, JS/TS and YAML files
+    Comments(Opts),
+    /// Python docstrings (module, class, function)
+    Docstrings(Opts),
+}
+
+#[derive(clap::Args, Debug)]
+struct Opts {
     /// Directory to process (git-tracked files under it, recursively).
     #[arg(required_unless_present = "eval")]
     path: Option<PathBuf>,
@@ -23,11 +37,11 @@ struct Cli {
     #[arg(long, conflicts_with = "eval")]
     diagnose: bool,
 
-    /// Reduce large dense comment blocks to one line (default).
+    /// Reduce large dense comment/docstring blocks to one line/short text (default).
     #[arg(long, conflicts_with = "delete")]
     reduce: bool,
 
-    /// Delete all non-structural comments.
+    /// Delete all non-structural comments/docstrings.
     #[arg(long)]
     delete: bool,
 
@@ -51,15 +65,16 @@ struct Cli {
     #[arg(long, default_value_t = 8)]
     concurrency: usize,
 
-    /// Minimum prose lines for a block to be reduced.
+    /// Minimum prose lines (comments) or non-blank docstring lines (docstrings) for a block to
+    /// be reduced.
     #[arg(long, default_value_t = 4)]
     min_lines: usize,
 
-    /// Minimum average words per line for a block to be reduced.
+    /// (comments only) Minimum average words per line for a block to be reduced.
     #[arg(long, default_value_t = 5.0)]
     min_density: f64,
 
-    /// Target max words in a summary.
+    /// (comments only) Target max words in a summary.
     #[arg(long, default_value_t = 20)]
     max_words: usize,
 
@@ -100,36 +115,46 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     // Panics inside a worker are caught and reported as warnings; keep the default hook quiet.
     std::panic::set_hook(Box::new(|_| {}));
-    let file = load_file_config(&cli.config)?;
+    let (target, opts) = match &cli.command {
+        Command::Comments(o) => (Target::Comments, o),
+        Command::Docstrings(o) => (Target::Docstrings, o),
+    };
+    let file = load_file_config(&opts.config)?;
     let cfg = Config {
-        mode: if cli.delete {
+        target,
+        mode: if opts.delete {
             Mode::Delete
         } else {
             Mode::Reduce
         },
-        min_lines: cli.min_lines,
-        min_density: cli.min_density,
-        max_summary_words: cli.max_words,
-        endpoint: cli
+        min_lines: opts.min_lines,
+        min_density: opts.min_density,
+        max_summary_words: opts.max_words,
+        endpoint: opts
             .endpoint
+            .clone()
             .or(file.endpoint)
             .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string()),
-        model: cli
+        model: opts
             .model
+            .clone()
             .or(file.model)
             .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-        api_key: cli.api_key.or(file.api_key),
-        llm_concurrency: cli.concurrency,
-        dry_run: cli.dry_run,
-        verbose: cli.verbose,
+        api_key: opts.api_key.clone().or(file.api_key),
+        llm_concurrency: opts.concurrency,
+        dry_run: opts.dry_run,
+        verbose: opts.verbose,
     };
-    if let Some(dataset) = &cli.eval {
-        return commentreducr::eval::run(dataset, &cfg);
+    if let Some(dataset) = &opts.eval {
+        return match target {
+            Target::Comments => commentreducr::eval::run(dataset, &cfg),
+            Target::Docstrings => commentreducr::eval::run_docstrings(dataset, &cfg),
+        };
     }
-    let path = cli.path.as_deref().unwrap();
-    if cli.diagnose {
+    let path = opts.path.as_deref().unwrap();
+    if opts.diagnose {
         println!("commentreducr {}", env!("CARGO_PKG_VERSION"));
-        let bad = commentreducr::diagnose(path)?;
+        let bad = commentreducr::diagnose(path, target)?;
         eprintln!("{bad} files with parse errors");
         if bad > 0 {
             std::process::exit(1);
@@ -137,8 +162,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let stats = run(path, &cfg)?;
+    let noun = match target {
+        Target::Comments => "comments",
+        Target::Docstrings => "docstrings",
+    };
     eprintln!(
-        "{} files scanned, {} changed, {} skipped; comments: {} kept, {} deleted, {} reduced, {} LLM failures",
+        "{} files scanned, {} changed, {} skipped; {noun}: {} kept, {} deleted, {} reduced, {} LLM failures",
         stats.files_scanned,
         stats.files_changed,
         stats.files_skipped,

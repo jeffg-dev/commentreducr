@@ -190,12 +190,16 @@ Test code is different: a test function or method docstring says what it guards 
 most 2 lines. A test module or test class docstring is at most one short paragraph -- 5 lines, \
 about 80 words -- and is DELETE outright if the tests are self-explanatory. Non-test docstrings: \
 a one-line summary first, then at most one short paragraph or a short Args/Returns list, 15 lines \
-hard maximum. Most docstrings on ordinary code are DELETE.";
+hard maximum. Most docstrings on ordinary code are DELETE. Only whether the docstringed \
+function/class/module is itself a test decides which rubric above applies -- a non-test helper \
+that merely lives in a test file (\"Test: no (in a test file)\") still follows the ordinary, \
+non-test rubric, with the ordinary 15-line cap.";
 
 /// Few-shot demos: (kind, name, signature, is_test, in_test_file, docstring text, body preview
-/// lines, body line count, expected reply). Nine categories: bloated test module, bloated test
+/// lines, body line count, expected reply). Ten categories: bloated test module, bloated test
 /// function, name-restating one-liner, implementation narration, history/ticket, a real
-/// call-order hazard, a pass-through/dunder, a class with real invariants, a caller headcount.
+/// call-order hazard, a pass-through/dunder, a class with real invariants, a caller headcount,
+/// and a non-test helper that merely lives in a test file.
 #[allow(clippy::type_complexity)]
 const DOC_DEMOS: &[(&str, &str, &str, bool, bool, &str, &[&str], usize, &str)] = &[
     (
@@ -332,6 +336,25 @@ const DOC_DEMOS: &[(&str, &str, &str, bool, bool, &str, &[&str], usize, &str)] =
         ],
         8,
         "KEEP\nUppercases and validates a 3-letter ISO 4217 currency code.",
+    ),
+    (
+        "function",
+        "_logs_with_frames",
+        "def _logs_with_frames(call: ast.Call, caught_name: str | None) -> bool:",
+        false,
+        true,
+        "Figures out whether a given logging call would actually render stack\nframes if it ran.\n\n\
+         The presence of exc_info isn't the whole question: the logging module \
+         treats a falsy exc_info as absent, so exception(..., exc_info=None) prints \
+         no traceback even though the keyword is there, while a bare exception(...) \
+         does print one because the method defaults exc_info to True. We walk the \
+         AST node, look at its keywords, and decide based on that.",
+        &[
+            "if not (isinstance(call.func, ast.Attribute) ...):",
+            "    return False",
+        ],
+        12,
+        "KEEP\nexc_info's presence isn't the question: logging treats a falsy\nvalue as absent, so exception(..., exc_info=None) prints nothing while\na bare exception(...) prints a traceback (the default is True).",
     ),
 ];
 

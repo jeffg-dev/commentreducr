@@ -124,6 +124,14 @@ fn main() -> Result<()> {
         Command::Comments(o) => (Target::Comments, o),
         Command::Docstrings(o) => (Target::Docstrings, o),
     };
+    // clap's `requires = "delete"` on --dry-run only fires against the arguments actually typed,
+    // so `--reduce --dry-run` (an explicit --reduce, rather than --reduce's absence) sails past
+    // it and would otherwise run the full reduce pipeline -- including live LLM calls -- with
+    // only the final write suppressed. Reduce mode does not support dry-run at all; check the
+    // resolved flag instead of trusting clap to have rejected every shape of this combination.
+    if opts.dry_run && !opts.delete {
+        anyhow::bail!("--dry-run only applies to --delete");
+    }
     let file = load_file_config(&opts.config)?;
     let cfg = Config {
         target,

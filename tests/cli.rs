@@ -282,6 +282,32 @@ fn dry_run_requires_delete() {
 }
 
 #[test]
+fn dry_run_with_explicit_reduce_is_also_rejected() {
+    // clap's `requires = "delete"` on --dry-run does not fire against an explicit --reduce (only
+    // against --reduce's absence), so this combination must be checked by hand -- otherwise it
+    // would run the full reduce pipeline, including live LLM calls, before being silently
+    // no-op'd at the final write.
+    let dir = setup_repo();
+    let before = snapshot(dir.path());
+
+    Command::cargo_bin("commentreducr")
+        .unwrap()
+        .arg("comments")
+        .arg(dir.path())
+        .arg("--reduce")
+        .arg("--dry-run")
+        .arg("--endpoint")
+        .arg("http://127.0.0.1:1/v1")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "--dry-run only applies to --delete",
+        ));
+
+    assert_eq!(snapshot(dir.path()), before, "rejected run modified files");
+}
+
+#[test]
 fn reduce_fails_hard_when_llm_unreachable() {
     let dir = setup_repo();
     let before = snapshot(dir.path());

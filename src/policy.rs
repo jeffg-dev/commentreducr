@@ -77,7 +77,6 @@ mod tests {
         ProseAnalysis {
             lines: vec![String::new(); lines],
             text: "some prose text here".into(),
-            sentences: vec![],
             word_count: 0,
             words_per_line,
             code_like,

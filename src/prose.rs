@@ -1,9 +1,8 @@
 //! Lightweight NLP over comment text: strip delimiters, drop separators / commented-out code,
-//! unwrap paragraphs, split sentences, measure density.
+//! unwrap paragraphs, measure density.
 use crate::types::{CommentBlock, CommentKind, Language};
 use regex::Regex;
 use std::sync::LazyLock;
-use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
 pub struct ProseAnalysis {
@@ -11,7 +10,6 @@ pub struct ProseAnalysis {
     pub lines: Vec<String>,
     /// Prose lines joined into flowing text.
     pub text: String,
-    pub sentences: Vec<String>,
     pub word_count: usize,
     /// word_count / lines.len() (0.0 if no lines).
     pub words_per_line: f64,
@@ -159,11 +157,6 @@ pub fn analyze(block: &CommentBlock, lang: Language) -> ProseAnalysis {
     let code_like = code_line_count > prose_lines.len();
 
     let text = prose_lines.join(" ");
-    let sentences: Vec<String> = text
-        .unicode_sentences()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
     let word_count: usize = prose_lines
         .iter()
         .map(|l| l.split_whitespace().count())
@@ -177,7 +170,6 @@ pub fn analyze(block: &CommentBlock, lang: Language) -> ProseAnalysis {
     ProseAnalysis {
         lines: prose_lines,
         text,
-        sentences,
         word_count,
         words_per_line,
         code_like,

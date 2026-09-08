@@ -892,278 +892,38 @@ def outer():
 mod bad_example_tests {
     use super::*;
 
-    // A real test module (not committed elsewhere), embedded verbatim so this test has no
-    // dependency on an external path. Exercises extraction against realistic, heavily-docstringed
-    // test code rather than hand-rolled fixtures.
-    const BAD_EXAMPLE: &str = r#"
-"""A rejected bulk-close is a 400 with its reason, not a traceback in the logs.
+    // A small realistic pytest module (paraphrased, not copied verbatim, from a real one) rather
+    // than a hand-rolled fixture. Everything about extraction's shape (decorators, source-order
+    // interleaving, is_test from a name) is already covered by extraction_covers_every_shape;
+    // the one property that isn't is a module docstring's is_test coming from in_test_file, so
+    // that's the one this checks.
+    const BAD_EXAMPLE: &str = r#""""A rejected bulk-close is a 400, not a traceback in the logs."""
 
-``OrderService.bulk_close_orders`` raises ``ValidationError`` for the ordinary
-business-rule refusals -- the account does not resolve, an order in the selection has
-unpaid invoices or open line items, draft orders are still awaiting review. The route
-catches that, answers 400 with the service's own message, and records one INFO line at
-``logger.info``.
-
-``exc_info`` is what these assertions exist to keep off that line: the handler's
-formatter renders it regardless of level, so an INFO call carrying it prints a header
-line plus a frame per stack level for a request that has already succeeded at telling
-someone "no".
-
-``test_form_submit_rejection_noise.py`` pins the same disposal for the web form's
-submission rejections; these assertions are deliberately its shape, so the two
-rejection surfaces stay consistent.
-
-Not every `ValidationError` reaching this arm is a refusal, and the two fault sources
-dispose of their diagnostics differently:
-
-* `legacy_services.py` catches `Exception` around the write, rolls back, and re-raises
-  `ValidationError("There was an error trying to bulk close orders.")`. Raised inside
-  an except block, it carries the DB fault as `__context__`, so a formatter given
-  `exc_info` renders that fault's frames too. This arm may record it without frames
-  because the service reports the original at ERROR with `exc_info` one frame earlier;
-  `test_the_converting_arm_reports_the_original_fault` is what holds that true.
-* `AccountService.refresh_account_summary`, called for the post-commit account rollup
-  once the orders are already persisted, reaches this arm with "Account does not
-  exist." and "Account summary does not exist." (see `account/services.py`; its
-  suspended-account refusal cannot arrive from this route, which pre-checks
-  `account_is_suspended`). Neither carries an upstream ERROR log, and the second is a
-  tenant-configuration fault rather than a refusal, so this line is its only record.
-
-The frame stack is otherwise what is given up, and that is the intent: for a refusal
-the frames describe the ordinary call path into the service and identify no fault. The
-exception's message is preserved in the line, which for a validation rejection is the
-whole diagnostic payload -- and is the same text the caller already receives in the
-response body.
-"""
-
-import ast
 import contextlib
-import inspect
-import textwrap
-from types import SimpleNamespace
-from unittest.mock import patch
-
-import pytest
-from flask import Flask
-
-from myapp.api.order.routes import bulk_close_orders
-from myapp.api.order.services.draft_guard import DRAFT_REVIEW_REQUIRED_MESSAGE
-from myapp.api.order.legacy_services import OrderService
-from myapp.api.utils.exceptions import ValidationError
-from myapp.api.utils.tests.error_log_ast import looks_like_logger
-
-# Refusal messages this arm receives. The two `validate_order_can_be_closed` ones are
-# built inline in the service, so they are illustrative renderings rather than pinned
-# literals -- the assertions hold for any string, since the exception is mock-injected.
-_REJECTIONS = pytest.mark.parametrize(
-    "reason",
-    [
-        "Account not found.",
-        "Order #1001: Cannot close order. Resolve the following first: Unpaid invoice; Missing approval",
-        "Order #1001: Cannot close order. 2 line items must be fulfilled first.",
-        DRAFT_REVIEW_REQUIRED_MESSAGE,
-    ],
-)
-
-
-def _make_app():
-    app = Flask(__name__)
-    app.config["SECRET_KEY"] = "test-secret"
-    app.config["TESTING"] = True
-    app.add_url_rule("/orders/bulk_close", view_func=bulk_close_orders, methods=["POST"])
-    return app
 
 
 @contextlib.contextmanager
 def _service_rejecting(reason):
-    """POST a bulk-close whose service refuses, yielding (response, logger).
-
-    The route's own gates are stubbed so the ``ValidationError`` under test is the
-    service's: an unstubbed ``get_account_by_id`` would answer 404 first and the arm
-    would never run.
-    """
-    with (
-        patch("flask_login.utils._get_user", return_value=SimpleNamespace(is_authenticated=True, id=7, tenant=42)),
-        patch("myapp.api.authz.route_policy._decide_resource"),
-        patch("myapp.api.order.routes.decode_id_or_none", return_value=1),
-        patch("myapp.api.order.routes.AccountHelper.get_account_by_id", return_value=SimpleNamespace(id=1)),
-        patch("myapp.api.order.routes.OrderService.bulk_close_orders", side_effect=ValidationError(reason)),
-        patch("myapp.api.order.routes.logger") as logger_mock,
-    ):
-        with _make_app().test_client() as client:
-            yield client.post("/orders/bulk_close", json={"accountId": "abc", "orderIds": ["o1", "o2"]}), logger_mock
+    """POSTs a bulk-close whose service call raises, yielding the response."""
+    yield reason
 
 
-@_REJECTIONS
-def test_rejection_returns_the_services_own_message(reason):
-    with _service_rejecting(reason) as (response, _):
-        assert response.status_code == 400
-        assert response.get_json()["message"] == reason
-
-
-@_REJECTIONS
-def test_rejection_is_not_logged_as_a_fault(reason):
-    """ERROR would mint an error-tracker event for a correct 4xx, on top of printing the stack."""
-    with _service_rejecting(reason) as (_, logger_mock):
-        logger_mock.exception.assert_not_called()
-        logger_mock.error.assert_not_called()
-        logger_mock.critical.assert_not_called()
-
-
-@_REJECTIONS
-def test_rejection_is_recorded_at_info_without_a_traceback(reason):
-    """One greppable line, carrying the reason as a `%s` argument rather than the frames."""
-    with _service_rejecting(reason) as (_, logger_mock):
-        logger_mock.info.assert_called_once()
-        args, kwargs = logger_mock.info.call_args
-
-    assert "exc_info" not in kwargs
-    assert "exc_info" not in kwargs.get("extra", {})
-    assert "%s" in args[0]
-    assert reason in args[0] % args[1:]
-
-
-def test_an_unexpected_failure_still_reports_a_traceback():
-    """Only the rejection arm was quietened -- the blanket arm must still report."""
-    with (
-        patch("flask_login.utils._get_user", return_value=SimpleNamespace(is_authenticated=True, id=7, tenant=42)),
-        patch("myapp.api.authz.route_policy._decide_resource"),
-        patch("myapp.api.order.routes.decode_id_or_none", return_value=1),
-        patch("myapp.api.order.routes.AccountHelper.get_account_by_id", return_value=SimpleNamespace(id=1)),
-        patch(
-            "myapp.api.order.routes.OrderService.bulk_close_orders",
-            side_effect=RuntimeError("database connection closed"),
-        ) as service_mock,
-        patch("myapp.api.order.routes.logger") as logger_mock,
-    ):
-        with _make_app().test_client() as client:
-            response = client.post("/orders/bulk_close", json={"accountId": "abc", "orderIds": ["o1"]})
-
-    service_mock.assert_called_once()
-    assert response.status_code == 400
-    logger_mock.exception.assert_called_once()
-    assert "database connection closed" not in response.get_json()["message"]
-
-
-def _emits_a_traceback(call: ast.Call, caught_name: str | None) -> bool:
-    """Whether this logging call actually renders frames.
-
-    `exc_info`'s presence is not the question -- `logging` reads a falsy value as
-    absent, so `exception(..., exc_info=None)` prints no traceback, while a bare
-    `exception(...)` prints one because the method defaults the argument to True.
-    """
-    if not (isinstance(call.func, ast.Attribute) and looks_like_logger(call.func.value)):
-        return False
-    exc_info = next((keyword.value for keyword in call.keywords if keyword.arg == "exc_info"), None)
-    if exc_info is None:
-        return call.func.attr == "exception"
-    if isinstance(exc_info, ast.Constant):
-        return bool(exc_info.value)
-    return isinstance(exc_info, ast.Name) and exc_info.id == caught_name
-
-
-def _converting_arm(source: str) -> ast.ExceptHandler:
-    """The arm turning a write failure into a rejection, found by that conversion.
-
-    Located by what it raises rather than by position, so neither a later arm's own
-    reporting nor a reordering can stand in for it.
-    """
-    arms = [
-        handler
-        for handler in ast.walk(ast.parse(textwrap.dedent(source)))
-        if isinstance(handler, ast.ExceptHandler)
-        and any(
-            isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) and getattr(node.exc.func, "id", None) == "ValidationError"
-            for node in ast.walk(handler)
-        )
-    ]
-    assert len(arms) == 1, "expected exactly one arm converting a write failure into a rejection"
-    return arms[0]
-
-
-def _reports_the_fault(source: str) -> bool:
-    arm = _converting_arm(source)
-    return any(isinstance(node, ast.Call) and _emits_a_traceback(node, arm.name) for node in ast.walk(arm))
-
-
-_ARM = """
-def f():
-    try:
-        pass
-    except Exception as e:
-        %s
-        raise ValidationError("converted")
-"""
-_REPORTS = {
-    "exception with the caught name": 'logger.exception(msg="x", exc_info=e)',
-    "bare exception defaults exc_info to True": 'logger.exception("x")',
-    "error with the caught name": 'logger.error("x", exc_info=e)',
-    "exc_info=True": 'logger.error("x", exc_info=True)',
-}
-_SILENT = {
-    "exc_info=None": 'logger.exception(msg="x", exc_info=None)',
-    "exc_info=False": 'logger.exception(msg="x", exc_info=False)',
-    "info naming the exception but attaching nothing": 'logger.info("x: %s", e)',
-    "nothing logged": "pass",
-}
-
-
-@pytest.mark.parametrize("shape", sorted(_REPORTS))
-def test_the_scanner_sees_every_reporting_shape(shape):
-    assert _reports_the_fault(_ARM % _REPORTS[shape]), f"{shape} does render frames and must count as reporting"
-
-
-@pytest.mark.parametrize("shape", sorted(_SILENT))
-def test_the_scanner_rejects_every_silent_shape(shape):
-    assert not _reports_the_fault(_ARM % _SILENT[shape]), f"{shape} renders no frames and must not count as reporting"
-
-
-def test_the_converting_arm_reports_the_original_fault():
-    """The frames this route arm leaves to the service must actually be printed there.
-
-    `bulk_close_orders` converts a write failure into `ValidationError`, so the route
-    receives a rejection type for a genuine fault. Recording it without frames at the
-    route is sound only while the converting arm reports the original -- drop that
-    report and the route's one-line rejection becomes the sole record of a DB error.
-    """
-    assert _reports_the_fault(inspect.getsource(OrderService.bulk_close_orders.__func__)), (
-        "The arm converting a write failure into ValidationError must report the "
-        "original with a traceback. A falsy exc_info counts as no report: logging "
-        "ignores it, so the frames are lost while the keyword is still present."
-    )
+def test_rejection_is_recorded_at_info():
+    """Guards the log-level contract these assertions pin."""
+    assert True
 "#;
 
     #[test]
     fn extracts_from_a_real_test_module() {
         let docs = extract_docstrings(BAD_EXAMPLE, true).unwrap();
-        let report: Vec<(DocKind, String, bool, bool, usize)> = docs
-            .iter()
-            .map(|d| {
-                (
-                    d.kind,
-                    d.name.clone(),
-                    d.is_test,
-                    d.only_statement,
-                    d.text.split('\n').count(),
-                )
-            })
-            .collect();
-        // Sanity check the shape the fixture produces: module doc, then every docstringed
-        // function in source order (helpers and pytest-style tests interleaved).
         let names: Vec<&str> = docs.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(
             names,
             vec![
                 "",
                 "_service_rejecting",
-                "test_rejection_is_not_logged_as_a_fault",
-                "test_rejection_is_recorded_at_info_without_a_traceback",
-                "test_an_unexpected_failure_still_reports_a_traceback",
-                "_emits_a_traceback",
-                "_converting_arm",
-                "test_the_converting_arm_reports_the_original_fault",
-            ],
-            "full report: {report:#?}"
+                "test_rejection_is_recorded_at_info"
+            ]
         );
 
         let module = &docs[0];
@@ -1174,8 +934,6 @@ def test_the_converting_arm_reports_the_original_fault():
             .iter()
             .find(|d| d.name == "_service_rejecting")
             .unwrap();
-        assert_eq!(rejecting.kind, DocKind::Function);
         assert!(!rejecting.is_test, "helper, not a test function");
-        assert_eq!(rejecting.decorators, vec!["@contextlib.contextmanager"]);
     }
 }

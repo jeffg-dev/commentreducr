@@ -27,10 +27,20 @@ code does not show and a reader would regret not knowing:
 
 `DELETE` when the comment is any of: restating what the code does; narrating
 steps; history, changelog, "previously this used to..."; tickets, authors,
-dates; describing how other parts of the code or other modules behave; design
-rationale evident from the code; general education about a library or
+dates; a leaky cross-reference — explaining how another module, caller, or
+sibling depends on, mirrors, or must stay in sync with this code ("called
+from the billing job", "same approach as parseHeader()", "keep in sync with
+constants in other_file.go") instead of stating this code's own contract;
+design rationale evident from the code; general education about a library or
 language feature; motivational or apologetic text; commented-out code;
 examples that duplicate tests.
+
+When a leaky cross-reference wraps a real hazard, don't just delete it —
+keep the terse line but restate the hazard in this code's own terms and drop
+the name of the other file, class, or caller. A precondition stated
+generically for any caller ("must hold the lock before calling this", "never
+pass caller input") is not a leak; naming a specific other file, class, or
+caller as the reason is.
 
 If a block mixes fluff with one genuinely surprising fact, the label is the
 terse line for that fact only. Tie-breaker: if a strong engineer would be
@@ -53,17 +63,17 @@ annoyed that the line survived (e.g. it says what `compare_digest`,
 
 ## Label distribution
 
-120 rows: 84 `DELETE` (70%), 36 kept.
+130 rows: 89 `DELETE` (68%), 41 kept.
 
 | language   | rows | DELETE | kept |
 |------------|-----:|-------:|-----:|
-| python     |   60 |     42 |   18 |
-| typescript |   40 |     22 |   18 |
-| javascript |   20 |     20 |    0 |
+| python     |   66 |     45 |   21 |
+| typescript |   42 |     23 |   19 |
+| javascript |   22 |     21 |    1 |
 
 (JS rows lean DELETE because the JS-flavoured synthetic blocks were written as
 the narration/history/commented-out-code cases; the TS rows carry the JS-side
-danger and quirk cases. Treat `javascript` + `typescript` as one 60-row split.)
+danger and quirk cases. Treat `javascript` + `typescript` as one 64-row split.)
 
 ## Train/dev split
 
@@ -102,9 +112,14 @@ contract, a gotcha, a call-order hazard, an invariant not visible in the signatu
 stay true after the body is rewritten. `DELETE` when the docstring narrates the implementation,
 restates the name/signature, reads like a pre-code spec (re-typing arguments or a request
 schema), carries history/tickets/PR numbers/authors/dates/phases, argues architecture or product
-rationale, counts today's callers, sits on a trivial one-liner/pass-through/dunder/plain data
+rationale, counts today's callers, names another module, caller, job, or sibling as the reason
+this code is written this way ("mirrors X", "similar to Y", "used by the scheduler", "see Z for
+how it works", "keep in sync with W"), sits on a trivial one-liner/pass-through/dunder/plain data
 class, or is a "TEMPORARY — delete this file" note. When a genuine contract or hazard is buried
-in bloat, the label keeps only that fact, terse, no story.
+in bloat, the label keeps only that fact, terse, no story — restated in this code's own terms,
+naming no other module, caller, or sibling. A generic precondition on any caller (hold a lock,
+call this before another step, never pass unsanitized input) is a contract and stays even when
+it names that other step; naming another module or caller as the *reason* is what goes.
 
 ### File format
 
@@ -127,16 +142,16 @@ in bloat, the label keeps only that fact, terse, no story.
 
 ### Label distribution
 
-60 rows: 37 `DELETE` (62%), 23 kept.
+68 rows: 41 `DELETE` (60%), 27 kept.
 
 | kind       | is_test | rows | kept | DELETE |
 |------------|:-------:|-----:|-----:|-------:|
-| module     | false   |    8 |    3 |      5 |
+| module     | false   |    9 |    4 |      5 |
 | module     | true    |   10 |    4 |      6 |
-| class      | false   |   10 |    3 |      7 |
+| class      | false   |   11 |    3 |      8 |
 | class      | true    |    2 |    1 |      1 |
-| function   | false   |   16 |    6 |     10 |
-| function   | true    |   14 |    6 |      8 |
+| function   | false   |   21 |    9 |     12 |
+| function   | true    |   15 |    6 |      9 |
 
 ### How to run
 
@@ -146,14 +161,18 @@ cargo run -- docstrings --eval tools/dataset/docstrings.jsonl
 
 Measured 2026-09-08 against oMLX, 8 requests in flight:
 
-| model                     | decision accuracy | DELETE precision / recall | kept avg lines / words | wall (60 rows) |
+| model                     | decision accuracy | DELETE precision / recall | kept avg lines / words | wall (68 rows) |
 |---------------------------|------------------:|--------------------------:|-----------------------:|---------------:|
-| `gemma-4-e2b-it-4bit`     |             85.0% |             91.2% / 83.8% |             1.9 / 19.4 |          ~15 s |
-| `gemma-4-26b-a4b-it-4bit` |             90.0% |             87.8% / 97.3% |             2.9 / 26.7 |          ~55 s |
+| `gemma-4-e2b-it-4bit`     |             80.9% |             88.9% / 78.0% |             1.7 / 17.2 |          ~16 s |
+| `gemma-4-26b-a4b-it-4bit` |             92.6% |             90.9% / 97.6% |             3.0 / 28.0 |          ~67 s |
 
-The decisions tie, but E2B's rewrites tend to drop the one gotcha the docstring exists to
-state, so `docstrings` defaults to the 26B model (`docstrings_model` in the config file).
-For reference the comment prompt on the same server: E2B 86.7%, 26B 94.2% on the 120-row set.
+The 26B model decides better and its rewrites keep the one gotcha the docstring exists to state
+where E2B drops it, so `docstrings` defaults to the 26B model (`docstrings_model` in the config
+file). For reference the comment prompt on the same server: E2B 90.0%, 26B 90.8% on the 130-row
+set. Both prompts are tuned against their default model; the leaky-cross-reference wording added
+2026-09-08 lifted E2B on comments (87.5% -> 90.0% on the original 120 rows) and 26B on docstrings
+(90.0% -> 91.7% on the original 60) while costing the non-default pairing a few points (26B on
+comments 94.6% -> 90.8%, E2B on docstrings 83.8% -> 80.9%, both on the enlarged sets).
 
 Prints per-row `ok`/`MISS` (expected label vs. the first line of what the model returned), then
 decision accuracy, `DELETE` precision/recall, and — for rows the model decided to keep — the

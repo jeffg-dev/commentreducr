@@ -59,7 +59,9 @@ D1 Describes what the code does or the steps it takes.\n\
 D2 Justifies a call or operator whose name already says why: compare_digest, safe_load, freeze, \
 debounce, ??, range bounds.\n\
 D3 History: tickets, authors, dates, past bugs, what the code used to do.\n\
-D4 Describes other modules, services or files, or what must be kept in sync elsewhere.\n\
+D4 Names another module, file, service or caller as the reason: what it does, expects, relies on \
+or mirrors; must stay in sync elsewhere; used by, called from, how many callers, see X for \
+details. A precondition on any caller (hold the lock, call this first) is not D4.\n\
 D5 General education about a library or language feature.\n\
 D6 Section banners, overviews, tables of contents, plans.\n\
 D7 Commented-out code, apologies, opinions, tuning anecdotes.\n\
@@ -68,7 +70,8 @@ Before choosing a K class, check the next code line: if the identifier, argument
 or arithmetic on it already reveals the fact (safe_load, compare_digest, errors='replace', \
 ?? '', * 1000, + 1, allow_redirects=False) the reader can see it and the class is D2.\n\n\
 When you keep, write the line as: the trap, then a semicolon, then what to do. Name the library \
-or identifier. Drop the story, the reasoning and the consequences beyond the trap itself. \
+or identifier, never another module, file, or caller. Drop the story, the reasoning and the \
+consequences beyond the trap itself. \
 Example reply: K1 requests drops Authorization on cross-host redirects; follow them manually. \
 Most comments are a D class.";
 
@@ -154,6 +157,40 @@ const DEMOS: &[(&str, &str, &str)] = &[
         "const locale = SUPPORTED.has(wanted) ? wanted : 'en';",
         "D8",
     ),
+    (
+        "This helper is only called from the CSV export path in exporters/csv.py; \
+         the JSON export path builds its own row dicts from scratch and never \
+         touches this function. If you are adding a new export format, look at \
+         build_json_row instead of extending this one.",
+        "def build_csv_row(record):",
+        "D4",
+    ),
+    (
+        "We return { id, total } here instead of a tuple because that is the shape \
+         the <OrderSummary> component in components/OrderSummary.tsx expects when \
+         it destructures the response to render the cart badge. The admin \
+         dashboard's summary widget calls a different endpoint and does not \
+         depend on this shape.",
+        "return { id: order.id, total: order.total };",
+        "D4",
+    ),
+    (
+        "The string that comes back from this is spliced into the page by the \
+         template layer using the |safe filter, so nothing downstream escapes it \
+         automatically. Both templates/blog_post.html and templates/comment.html \
+         rely on that. If any of this ever contains raw user input, it becomes \
+         stored XSS.",
+        "return render_snippet(body, allow_html=False)",
+        "K4 output skips autoescaping downstream; never splice in unescaped user input",
+    ),
+    (
+        "Make sure flush() has been called before close() on this writer. close() throws away \
+         whatever is still sitting in the buffer instead of flushing it, so anything written since \
+         the last flush is silently lost. The nightly export job in jobs/export.py got bitten by \
+         this and lost the last page of every report for a week.",
+        "def close(self):",
+        "K2 call flush() before close(); close() discards the buffer silently",
+    ),
 ];
 
 /// Bound what we send: traps are stated early, and long blocks are mostly story.
@@ -182,10 +219,18 @@ DELETE when the docstring: narrates what the code does step by step; restates th
 signature in words; reads like a spec written before the code (re-typing arguments or a request \
 schema the signature or types already show); carries a ticket, PR number, author, date, or phase \
 label; argues architecture or product rationale instead of usage; counts or lists today's \
-callers; sits on a trivial one-liner, pass-through, dunder, or plain data class where the name \
-and signature already say it; or is a maintenance note (\"TEMPORARY\", \"delete this file\").\n\n\
+callers; explains why it exists or has this shape by naming another module, caller, job, or \
+sibling (\"X calls this\", \"used by the scheduler\", \"mirrors/similar to/same as Y\", \"see Z for how \
+it works\", \"keep in sync with W\"); sits on a trivial one-liner, pass-through, dunder, or plain \
+data class where the name and signature already say it; or is a maintenance note (\"TEMPORARY\", \
+\"delete this file\").\n\n\
 KEEP (rewritten) only the buried contract or hazard, terse, no story, when one is genuinely \
-there.\n\n\
+there -- state it in this code's own terms (its parameters, return value, ordering, or state), \
+never by naming the other module, caller, or sibling that supposedly needs it. A precondition \
+any caller must satisfy (hold a lock, call this before another step, never pass unsanitized \
+input), or a stub or fixture every test in a test module needs, is a self-contained contract and \
+stays even when that other step is named; what must go is the claim that some other file, job, \
+or caller is the reason.\n\n\
 Test code is different: a test function or method docstring says what it guards or tests, at \
 most 2 lines. A test module or test class docstring is at most one short paragraph -- 5 lines, \
 about 80 words -- and is DELETE outright if the tests are self-explanatory. Non-test docstrings: \
@@ -196,10 +241,11 @@ that merely lives in a test file (\"Test: no (in a test file)\") still follows t
 non-test rubric, with the ordinary 15-line cap.";
 
 /// Few-shot demos: (kind, name, signature, is_test, in_test_file, docstring text, body preview
-/// lines, body line count, expected reply). Ten categories: bloated test module, bloated test
+/// lines, body line count, expected reply). Twelve categories: bloated test module, bloated test
 /// function, name-restating one-liner, implementation narration, history/ticket, a real
 /// call-order hazard, a pass-through/dunder, a class with real invariants, a caller headcount,
-/// and a non-test helper that merely lives in a test file.
+/// a non-test helper that merely lives in a test file, a genuine contract buried in
+/// mirrors/expects-elsewhere framing, and a pure cross-reference leak with no contract at all.
 #[allow(clippy::type_complexity)]
 const DOC_DEMOS: &[(&str, &str, &str, bool, bool, &str, &[&str], usize, &str)] = &[
     (
@@ -355,6 +401,40 @@ const DOC_DEMOS: &[(&str, &str, &str, bool, bool, &str, &[&str], usize, &str)] =
         ],
         12,
         "KEEP\nexc_info's presence isn't the question: logging treats a falsy\nvalue as absent, so exception(..., exc_info=None) prints nothing while\na bare exception(...) prints a traceback (the default is True).",
+    ),
+    (
+        "function",
+        "encode_page_cursor",
+        "def encode_page_cursor(last_id: int, last_sort_key: str) -> str:",
+        false,
+        false,
+        "Encodes the last row's sort key and id into an opaque pagination cursor.\n\n\
+         This mirrors how CursorCodec.decode() on the other end reconstructs the tuple, \
+         and the admin dashboard's bulk-export job expects the same base64-of-json shape \
+         when it resumes a paused export. The fields must stay in (sort_key, id) order: \
+         swapping them makes the encoded tuple compare greater than every real row, so a \
+         client resuming from it silently gets an empty page instead of the rest of the \
+         results.",
+        &[
+            "payload = json.dumps([last_sort_key, last_id])",
+            "return base64.urlsafe_b64encode(payload.encode()).decode()",
+        ],
+        4,
+        "KEEP\nEncodes as (sort_key, id) in that order: swapping them makes the cursor\ncompare greater than every real row, so resuming from it silently returns\nan empty page instead of what's left.",
+    ),
+    (
+        "function",
+        "format_currency_for_export",
+        "def format_currency_for_export(amount_cents: int) -> str:",
+        false,
+        false,
+        "Formats a cent amount as a decimal string for CSV export.\n\n\
+         This exists because the nightly reporting job in reports/export_worker.py calls \
+         it once per row when it builds the finance CSV, matching the same no-symbol shape \
+         format_currency_for_display uses for the UI-facing string, minus the dollar sign.",
+        &["return f\"{amount_cents / 100:.2f}\""],
+        2,
+        "DELETE",
     ),
 ];
 

@@ -6,6 +6,8 @@ A **good** docstring helps the person calling the code, not the person who wrote
 
 A **bad** docstring is bloated relative to what it documents, narrates the implementation line-by-line instead of explaining usage, reads like a spec written before the code, or drags in point-in-time history that will go stale the moment the ticket it cites is closed.
 
+A docstring can also fail by leaking a cross-reference: explaining how some OTHER module, caller, or sibling function uses, depends on, mirrors, or must stay in sync with this code, instead of stating this code's own contract. "Matches ObjectHelper._has_access_to_note", "same approach as in foo()", "called from the billing job", and "keep in sync with constants in other_file.go" are all the same failure: naming who or what else is involved instead of restating the hazard in this code's own terms. A precondition on any caller, stated generically ("call this before mutating X", "never pass caller input") is not this failure — it is a self-contained contract; naming a specific other file, class, or caller as the reason is.
+
 Sometimes the right docstring is **no docstring** — a name, a signature, and a one-line body already say everything a caller needs, and adding prose on top would only be noise.
 
 ---
@@ -18,9 +20,8 @@ Module docstring explaining a cross-flag dependency that lives nowhere else.
 ```python
 """The two per-tenant flags that stage the permissions v2 rollout.
 
-Both flags are read through this module rather than through
-:class:`~myapp.api.features.helpers.FeatureHelper` directly, so the dependency
-between them lives in one place:
+Reading either flag any other way loses the dependency between them, so
+treat this module as the only entry point:
 
 - ``authz_enforcement`` decides whether authorization outcomes come from the
   v2 engine or from the legacy role predicate. It is temporary; it is
@@ -38,7 +39,7 @@ reason.
 ```
 `myapp/api/authz/rollout.py`
 
-Tells a consumer what each flag means, why one requires the other, and what happens on a failed lookup — all facts that survive any rewrite of the flag-reading code underneath. No ticket references, no rollout timeline, just the contract.
+Tells a consumer what each flag means, why one requires the other, and what happens on a failed lookup — all facts that survive any rewrite of the flag-reading code underneath, stated without naming the sibling helper class this module wraps. No ticket references, no rollout timeline, just the contract.
 
 ### `DbRole` — one role, a named list of permissions
 Class docstring stating invariants that don't live in any single column.
@@ -55,8 +56,8 @@ class DbRole(DbBaseModel, DbStandardModel):
     tables: a custom name must not collide with any builtin name, and a
     non-restricted role must not contain restricted permissions.
 
-    ``restricted`` mirrors the flag on permissions: the role is assignable
-    and visible only in the platform tenant.
+    A ``restricted`` role is assignable and visible only in the platform
+    tenant.
     """
 ```
 `myapp/api/authz/models/db_role.py`
@@ -162,11 +163,10 @@ def check_access(self, user_id: int, tenant_id: int, object_id: int) -> bool:
     """Entry point callers must use to gate note access to an object.
 
     Loads the user once and enforces the notes-wide policy that customer
-    users are always denied (matches ObjectHelper._has_access_to_note --
-    notes carry no independent customer-visibility gate the way comments do via
-    DbCommentGroup.customer_accessible) before deferring to the
-    handler's own role-specific check. Centralized here so a new handler
-    can't land without it.
+    users are always denied -- unconditionally, since notes carry no per-row
+    customer-visibility field to check -- before deferring to the handler's
+    own role-specific check. Centralized here so a new handler can't land
+    without it.
 
     Args:
         user_id: The user ID to check access for
@@ -179,7 +179,7 @@ def check_access(self, user_id: int, tenant_id: int, object_id: int) -> bool:
 ```
 `myapp/api/notes/handlers/base_object_handler.py`
 
-Tells the consumer the one thing the name alone doesn't: this is the required gate, not an optional check, and states the security policy it enforces before any subclass runs. It stays accurate regardless of how individual handlers implement their own check.
+Tells the consumer the one thing the name alone doesn't: this is the required gate, not an optional check, and states the security policy it enforces — unconditional denial, because there is no per-row field to consult — before any subclass runs. It stays accurate regardless of how individual handlers implement their own check, and it no longer needs another class's name to make the point.
 
 ### `DbTemplateRule.series_uuid` — a fallback that isn't a bug
 Property docstring explaining a deliberate default.
@@ -192,35 +192,32 @@ def series_uuid(self) -> str:
     Falls back to `uuid` rather than being backfilled: a rule that has never been
     cloned IS the first version of its own lineage, so its own uuid is the right
     answer and stays the answer once `clone_rules_for_template` stamps it onto the
-    copy. Same convention as the two `source_*_uuid` columns above -- NULL means
-    "not inherited", not "unknown".
+    copy. A NULL backing value means "not inherited", not "unknown" -- never
+    treat it as missing data that needs a backfill.
     """
     return self.series_rule_uuid or str(self.uuid)
 ```
 `myapp/api/template_automation/models/db_template_rule.py`
 
-Explains why the fallback is correct rather than a stopgap, and states a convention (`NULL` means "not inherited") that a caller would otherwise have to reverse-engineer from other columns in the same table.
+Explains why the fallback is correct rather than a stopgap, and states a convention (`NULL` means "not inherited") in this property's own terms, not by pointing the reader at other columns in the table to go verify.
 
-### `role_used_by_workspace_items` — a constraint that crosses functions
-Method docstring documenting a hidden coupling to a sibling function.
+### `role_used_by_workspace_items` — counting items without double-counting
+Method docstring stating a self-contained counting hazard.
 
 ```python
 @classmethod
 def role_used_by_workspace_items(cls, workspace_id: int, role_id: int, tenant_id: int) -> bool:
-    """Must agree with ``role_item_counts`` on what "an item on this workspace"
-    means -- both are read by the same orphan-role flow (this is the
-    authoritative re-check the cleanup route runs; ``role_item_counts``
-    drives the preview that offers the cleanup in the first place), so
-    drives off ``DbItem.workspace_id`` for the same reason: the
-    ``DbItemMapping``->``DbSectionMapping`` chain (``ItemHelper.
-    get_items_by_workspace_id_query``) has no ``.distinct()`` and can
-    double-count, and an item reachable through one path and not the other
-    would make the preview and this re-check disagree.
+    """Whether any item on this workspace currently has this role.
+
+    Counts items by ``DbItem.workspace_id`` directly rather than walking
+    the ``DbItemMapping``->``DbSectionMapping`` mapping chain, which has
+    no ``.distinct()`` and can double-count: an item reachable through
+    more than one mapping path must still be counted once, not per path.
     """
 ```
 `myapp/api/workspace/helperClasses/workspace_role_derivation_service.py`
 
-Flags a constraint that would never surface from reading this function alone: it must stay in lockstep with a different function it never calls, or a preview and its re-check will silently disagree.
+States the counting rule in this function's own terms -- which column it counts on, and the exact bug (a non-distinct join chain) a naive rewrite would reintroduce -- without naming the function it must agree with or the route that calls it. Both were true facts, but neither is part of this function's own contract: a caller who breaks the "count once per item" invariant breaks it whether or not they've ever heard of role_item_counts.
 
 ### `utc_naive_now` — when to use it, and why the alternative breaks
 Function docstring for a genuinely subtle timezone gotcha.
@@ -247,6 +244,28 @@ Earns its length: the bug it prevents (a stored timestamp that silently depends 
 ---
 
 ## Bad examples
+
+### `normalize_workspace_slug` — a docstring that only talks about other files
+Function docstring naming every caller and sibling instead of stating its own contract.
+
+```python
+def normalize_workspace_slug(raw: str) -> str:
+    """Normalize a workspace slug for storage and lookup.
+
+    Called from WorkspaceCreateService.create() and from the PATCH
+    /workspaces/{id}/rename route, both of which run this before writing
+    DbWorkspace.slug. The reporting ETL's workspace_dim loader does the same
+    normalization independently in etl/dims/workspace_dim.py, so any change
+    here must be mirrored there or the warehouse and the app will disagree on
+    which two slugs are "the same" workspace.
+
+    See WorkspaceCreateService.create for the full validation this feeds into.
+    """
+    return raw.strip().lower().replace(" ", "-")
+```
+`myapp/api/workspace/slugs.py`
+
+Every sentence names some OTHER piece of code -- two callers, an ETL loader it must be kept in sync with, and a pointer to a different docstring for "the real" contract -- and none of it is a fact about what normalize_workspace_slug itself does. Delete the call graph and one sentence survives that a caller actually needs: it strips, lowercases, and dashes. If the ETL agreement is a real hazard, it belongs restated in this function's own terms ("must match the transform applied wherever slugs are compared for equality") or as a comment on the other file -- never as a fact this docstring has to carry about a file two directories away.
 
 ### `legacy_providers` — a maintenance note wearing a docstring
 Module docstring that talks to future engineers, not callers.

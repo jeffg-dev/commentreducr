@@ -304,7 +304,7 @@ fn delete_dry_run_counts_but_writes_nothing() {
         .arg("--dry-run")
         .assert()
         .success()
-        .stdout(predicates::str::contains(": delete "))
+        .stdout(predicates::str::contains(" deleted ("))
         .stderr(predicates::str::contains(
             "5 files scanned, 5 changed, 0 skipped",
         ));
@@ -550,7 +550,8 @@ fn docstrings_delete_dry_run_prints_and_writes_nothing() {
         .arg("--dry-run")
         .assert()
         .success()
-        .stdout(predicates::str::contains("delete docstring"));
+        .stdout(predicates::str::contains("test_sample.py: "))
+        .stdout(predicates::str::contains(" deleted ("));
 
     assert_eq!(
         read(dir.path(), "test_sample.py"),
@@ -658,7 +659,7 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         .arg("--reduce")
         .arg("--min-lines")
         .arg("1")
-        .arg("--concurrency")
+        .arg("-n")
         .arg("1")
         .arg("--endpoint")
         .arg(&endpoint)
@@ -669,9 +670,9 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         .stderr(predicates::str::contains(
             "2 files scanned, 2 changed, 0 skipped",
         ))
-        .stderr(predicates::str::contains(
-            "docstrings: 2 kept, 4 deleted, 2 reduced, 1 LLM failures",
-        ));
+        .stderr(predicates::str::contains("docstrings: 2 kept, 4 deleted ("))
+        .stderr(predicates::str::contains("lines), 2 reduced ("))
+        .stderr(predicates::str::contains("lines saved), 1 LLM failures"));
 
     let test_sample = read(dir.path(), "test_sample.py");
     // Module docstring: own_line, indent "" -- KEEP text spliced in with PEP 257 closing quotes
@@ -741,7 +742,7 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         .arg("--reduce")
         .arg("--min-lines")
         .arg("1")
-        .arg("--concurrency")
+        .arg("-n")
         .arg("1")
         .arg("--endpoint")
         .arg(&endpoint)

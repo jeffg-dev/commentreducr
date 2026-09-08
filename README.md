@@ -54,6 +54,10 @@ slower per request, but E2B tends to drop the very gotcha a docstring exists to 
 models run but are unmeasured. [oMLX](https://github.com/jundot/omlx) is a good server on
 Apple Silicon since it caches the prompt prefix.
 
+The default build only talks to a plain `http://` endpoint, which covers a local server like
+the ones above. For an `https://` endpoint (e.g. a cloud API), install with
+`cargo install commentreducr --features tls`.
+
 Config in `~/.config/commentreducr/config.toml` (or `--config FILE`). Flags override.
 
 ```toml

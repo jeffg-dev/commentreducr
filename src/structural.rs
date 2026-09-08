@@ -8,15 +8,20 @@ use std::sync::LazyLock;
 enum Scope {
     Python,
     Js,
-    Both,
+    Yaml,
+    All,
 }
 
 impl Scope {
     fn matches(self, lang: Language) -> bool {
         match self {
-            Scope::Both => true,
+            Scope::All => true,
             Scope::Python => lang == Language::Python,
-            Scope::Js => lang != Language::Python,
+            Scope::Js => matches!(
+                lang,
+                Language::JavaScript | Language::TypeScript | Language::Tsx
+            ),
+            Scope::Yaml => lang == Language::Yaml,
         }
     }
 }
@@ -32,8 +37,8 @@ static RULES: LazyLock<Vec<(Scope, Regex)>> = LazyLock::new(|| {
             Scope::Python,
             r"(?i)^#\s*(noqa\b|type:|pyright:|pylint:|mypy:|ruff:|isort:|fmt:|pragma\b|nosec\b|noinspection\b|cython:|distutils:|%%)",
         ),
-        // Both: TODO/FIXME/XXX/HACK/NOTE, anywhere in the comment.
-        (Scope::Both, r"(?i)\b(TODO|FIXME|XXX|HACK|NOTE)\b"),
+        // All: TODO/FIXME/XXX/HACK/NOTE, anywhere in the comment.
+        (Scope::All, r"(?i)\b(TODO|FIXME|XXX|HACK|NOTE)\b"),
         // JS/TS: eslint-*, @ts-*, prettier/biome ignore, coverage ignores, @flow, @jsx*, @license,
         // @preserve, @generated, #region/#endregion, webpack/vite magic comments.
         (
@@ -44,6 +49,18 @@ static RULES: LazyLock<Vec<(Scope, Regex)>> = LazyLock::new(|| {
         (
             Scope::Js,
             r"^(///\s*<reference|//#\s*source(MappingURL|URL))",
+        ),
+        // YAML: language-server/lint/scanner/IaC directives, anchored at the start of the comment
+        // (after `#` and optional spaces).
+        (
+            Scope::Yaml,
+            r"(?i)^#\s*(yaml-language-server:|yamllint\b|prettier-ignore\b|noqa\b|checkov:skip\b|bridgecrew:skip\b|kics-scan\b|tflint-ignore\b|trivy:ignore\b|renovate:|ansible-lint\b|kube-linter\b|nosemgrep\b|ruleid:|pragma\b|@formatter:|region\b|endregion\b|language\s*=)",
+        ),
+        // All: editor modelines, anywhere in the comment (vim/vi/ex `set`, or an Emacs `-*- ... -*-`
+        // local-variables line).
+        (
+            Scope::All,
+            r"(?i)(\b(vim|vi|ex):\s*set(tings?)?\b|-\*-.*?-\*-)",
         ),
     ];
     specs
@@ -59,14 +76,18 @@ static LICENSE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b(license|copyright|SPDX)\b").unwrap());
 
 /// True if the block (or any comment in it) is structural and must be preserved in both modes.
-/// `src` is unused now that license/copyright/SPDX detection no longer depends on file position,
-/// but is kept in the signature per the module contract.
-pub fn is_structural(block: &CommentBlock, lang: Language, _src: &str) -> bool {
-    // Python shebang: the very first byte of the file.
-    if lang == Language::Python
-        && block.start == 0
+pub fn is_structural(block: &CommentBlock, lang: Language, src: &str) -> bool {
+    // Python/YAML shebang: the very first byte of the file, or right after a leading UTF-8 BOM
+    // (which some editors/tools prepend and which must itself survive untouched).
+    let content_start = if src.starts_with('\u{feff}') {
+        '\u{feff}'.len_utf8()
+    } else {
+        0
+    };
+    if matches!(lang, Language::Python | Language::Yaml)
+        && block.start == content_start
         && let Some(first) = block.comments.first()
-        && first.start == 0
+        && first.start == content_start
         && first.text.starts_with("#!")
     {
         return true;
@@ -83,11 +104,12 @@ pub fn is_structural(block: &CommentBlock, lang: Language, _src: &str) -> bool {
     }
 
     // JS/TS: any Block comment starting with `/**` or `/*!` (JSDoc, `@license`/`@preserve` banners).
-    if lang != Language::Python
-        && block.comments.iter().any(|c| {
-            c.kind == CommentKind::Block && (c.text.starts_with("/**") || c.text.starts_with("/*!"))
-        })
-    {
+    if matches!(
+        lang,
+        Language::JavaScript | Language::TypeScript | Language::Tsx
+    ) && block.comments.iter().any(|c| {
+        c.kind == CommentKind::Block && (c.text.starts_with("/**") || c.text.starts_with("/*!"))
+    }) {
         return true;
     }
 
@@ -166,6 +188,15 @@ mod tests {
                 true,
             ),
             ("/* @vite-ignore */", Language::JavaScript, 50, 3, true),
+            (
+                "# yaml-language-server: $schema=https://example.com/schema.json",
+                Language::Yaml,
+                0,
+                0,
+                true,
+            ),
+            ("# just a plain comment", Language::Yaml, 100, 5, false),
+            ("# vim: set ft=yaml:", Language::Yaml, 100, 5, true),
         ];
         for (text, lang, start, start_line, expected) in cases {
             let block = block_for(text, *start, *start_line);
@@ -176,5 +207,18 @@ mod tests {
                 "text = {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn shebang_after_a_leading_bom_is_structural() {
+        let bom = "\u{feff}";
+        let text = "#!/usr/bin/env ansible-playbook";
+        let start = bom.len();
+        let block = block_for(text, start, 0);
+        let src = format!("{bom}{text}\nkey: value\n");
+        assert!(
+            is_structural(&block, Language::Yaml, &src),
+            "a shebang right after a BOM must still be structural"
+        );
     }
 }

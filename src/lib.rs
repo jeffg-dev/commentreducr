@@ -1,3 +1,4 @@
+pub mod docstring;
 pub mod eval;
 pub mod files;
 pub mod llm;
@@ -10,8 +11,10 @@ pub mod structural;
 pub mod types;
 
 use anyhow::Result;
-use llm::LlmClient;
+use docstring::{DocKind, Docstring};
+use llm::{DocRequest, DocVerdict, LlmClient};
 use progress::Progress;
+use rewrite::Edit;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::Mutex;
@@ -76,13 +79,19 @@ struct FileResult {
 /// pass can show percentage progress and an estimate of the time left.
 pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     let mut tracked = files::tracked_source_files(root)?;
+    if cfg.target == Target::Docstrings {
+        tracked.retain(|(_, lang)| *lang == Language::Python);
+    }
     let llm = (cfg.mode == Mode::Reduce).then(|| LlmClient::new(cfg));
     let mut progress = Progress::silent();
     if let Some(client) = &llm {
         client.check()?;
         let mut total = 0;
         tracked = parallel(tracked, cfg.llm_concurrency, |(path, lang)| {
-            reduce_block_count(path, *lang, cfg)
+            match cfg.target {
+                Target::Comments => reduce_block_count(path, *lang, cfg),
+                Target::Docstrings => reduce_docstring_count(path, cfg),
+            }
         })
         .into_iter()
         .map(|(item, n)| {
@@ -90,10 +99,11 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
             item
         })
         .collect();
-        eprintln!(
-            "{} files, {total} comment blocks to send to the LLM",
-            tracked.len()
-        );
+        let noun = match cfg.target {
+            Target::Comments => "comment blocks",
+            Target::Docstrings => "docstrings",
+        };
+        eprintln!("{} files, {total} {noun} to send to the LLM", tracked.len());
         progress = Progress::new(total, tracked.len(), llm.as_ref().map(|c| &c.tokens));
     }
 
@@ -102,7 +112,10 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
         ..Stats::default()
     };
     let results = parallel(tracked, cfg.llm_concurrency, |(path, lang)| {
-        let r = process_file(path, *lang, llm.as_ref(), cfg, &progress);
+        let r = match cfg.target {
+            Target::Comments => process_file(path, *lang, llm.as_ref(), cfg, &progress),
+            Target::Docstrings => process_docstrings(path, llm.as_ref(), cfg, &progress),
+        };
         progress.file_done();
         r
     });
@@ -124,13 +137,17 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     Ok(stats)
 }
 
-/// Parse every tracked source file under `root` and print a redacted report (see
-/// `parse::diagnose`) of each one with parse errors to stdout, numbered; the path each number
-/// stands for goes to stderr so the stdout report can be pasted into a bug report as is.
-/// No LLM, no writes. Returns the number of files with parse errors.
-pub fn diagnose(root: &Path) -> Result<usize> {
+/// Parse every tracked source file under `root` (for `Target::Docstrings`, Python files only) and
+/// print a redacted report (see `parse::diagnose`) of each one with parse errors to stdout,
+/// numbered; the path each number stands for goes to stderr so the stdout report can be pasted
+/// into a bug report as is. No LLM, no writes. Returns the number of files with parse errors.
+pub fn diagnose(root: &Path, target: Target) -> Result<usize> {
     let mut bad = 0;
-    for (path, lang) in files::tracked_source_files(root)? {
+    let mut tracked = files::tracked_source_files(root)?;
+    if target == Target::Docstrings {
+        tracked.retain(|(_, lang)| *lang == Language::Python);
+    }
+    for (path, lang) in tracked {
         let src = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {
@@ -286,11 +303,24 @@ fn process_file(
         }
     }
 
-    if edits.is_empty() {
-        return result;
-    }
+    write_edits(path, &src, edits, cfg, progress, &mut result);
+    result
+}
 
-    let new_src = rewrite::apply(&src, edits);
+/// Shared tail of `process_file`/`process_docstrings`: apply the collected edits and, unless
+/// `dry_run`, write the file back if anything actually changed. No-op when `edits` is empty.
+fn write_edits(
+    path: &Path,
+    src: &str,
+    edits: Vec<Edit>,
+    cfg: &Config,
+    progress: &Progress,
+    result: &mut FileResult,
+) {
+    if edits.is_empty() {
+        return;
+    }
+    let new_src = rewrite::apply(src, edits);
     if new_src != src {
         result.changed = true;
         if !cfg.dry_run
@@ -300,7 +330,183 @@ fn process_file(
             result.changed = false;
         }
     }
+}
 
+/// Decision for one docstring (mirrors `Action` for comment blocks). The `Delete` edit is
+/// computed at plan time (it is pure, given `src` and the docstring) so it need not be recomputed
+/// when applying it.
+enum DocAction {
+    Keep,
+    Delete(Edit),
+    Reduce,
+}
+
+/// structural => Keep (both modes); Delete mode => Delete when `docstring::delete_edit` finds it
+/// safe to remove, else Keep; Reduce mode => Reduce when the docstring has at least
+/// `cfg.min_lines` non-blank text lines, else Keep (the LLM call itself happens in
+/// `process_docstrings`, not here).
+fn decide_docstring(doc: &Docstring, src: &str, cfg: &Config) -> DocAction {
+    if docstring::is_structural(doc, src) {
+        return DocAction::Keep;
+    }
+    match cfg.mode {
+        Mode::Delete => match docstring::delete_edit(src, doc) {
+            Some(edit) => DocAction::Delete(edit),
+            None => DocAction::Keep,
+        },
+        Mode::Reduce => {
+            let non_blank = doc.text.lines().filter(|l| !l.trim().is_empty()).count();
+            if non_blank < cfg.min_lines {
+                DocAction::Keep
+            } else {
+                DocAction::Reduce
+            }
+        }
+    }
+}
+
+/// Read and parse one Python file and decide an action for every docstring (no LLM, no writes).
+/// Recoverable failures (unreadable / non-UTF-8 file, a parser error) come back as a message.
+fn plan_docstrings(
+    path: &Path,
+    cfg: &Config,
+) -> Result<(String, Vec<(Docstring, DocAction)>), String> {
+    let src = std::fs::read_to_string(path).map_err(|e| format!("unreadable: {e}"))?;
+    let in_test_file = docstring::is_test_file(path);
+    let docs = docstring::extract_docstrings(&src, in_test_file).map_err(|e| format!("{e:#}"))?;
+    let plan = docs
+        .into_iter()
+        .map(|doc| {
+            let action = decide_docstring(&doc, &src, cfg);
+            (doc, action)
+        })
+        .collect();
+    Ok((src, plan))
+}
+
+/// Number of docstrings in the file that will need an LLM call; 0 for a file that cannot be
+/// planned (the real pass will warn about it).
+fn reduce_docstring_count(path: &Path, cfg: &Config) -> usize {
+    plan_docstrings(path, cfg).map_or(0, |(_, plan)| {
+        plan.iter()
+            .filter(|(_, a)| matches!(a, DocAction::Reduce))
+            .count()
+    })
+}
+
+/// `DocRequest` view of one extracted docstring, for `LlmClient::rewrite_docstring`.
+fn doc_request(doc: &Docstring) -> DocRequest<'_> {
+    DocRequest {
+        kind: match doc.kind {
+            DocKind::Module => "module",
+            DocKind::Class => "class",
+            DocKind::Function => "function",
+        },
+        name: &doc.name,
+        signature: &doc.signature,
+        is_test: doc.is_test,
+        in_test_file: doc.in_test_file,
+        text: &doc.text,
+        body_preview: &doc.body_preview,
+        body_lines: doc.body_lines,
+    }
+}
+
+/// Read, analyze and (if anything changed) rewrite one Python file's docstrings. Recoverable
+/// failures (unreadable / non-UTF-8 file, a parser error) are reported with a warning and the
+/// file is skipped; a failed LLM call, or a reply `docstring::replace_edit` refuses as unsafe,
+/// leaves that docstring unchanged.
+fn process_docstrings(
+    path: &Path,
+    llm: Option<&LlmClient>,
+    cfg: &Config,
+    progress: &Progress,
+) -> FileResult {
+    let mut result = FileResult::default();
+    let (src, plan) = match plan_docstrings(path, cfg) {
+        Ok(p) => p,
+        Err(msg) => {
+            progress.warn(format!("skipping {} ({msg})", path.display()));
+            result.skipped = true;
+            return result;
+        }
+    };
+
+    let mut edits = Vec::new();
+    for (doc, action) in plan {
+        match action {
+            DocAction::Keep => result.kept += 1,
+            DocAction::Delete(edit) => {
+                result.deleted += 1;
+                if cfg.dry_run || cfg.verbose {
+                    progress.print(format!(
+                        "{}:{}: delete docstring ({} lines)",
+                        path.display(),
+                        doc.start_line + 1,
+                        doc.end_line - doc.start_line + 1,
+                    ));
+                }
+                edits.push(edit);
+            }
+            DocAction::Reduce => {
+                let line = doc.start_line + 1;
+                let client = llm.expect("reduce mode has an LLM");
+                let verdict = client.rewrite_docstring(&doc_request(&doc));
+                progress.tick();
+                let verdict = match verdict {
+                    Ok(v) => v,
+                    Err(err) => {
+                        progress.warn(format!(
+                            "{}:{line}: left unchanged, LLM failed ({err:#})",
+                            path.display()
+                        ));
+                        result.llm_errors += 1;
+                        result.kept += 1;
+                        continue;
+                    }
+                };
+                match verdict {
+                    DocVerdict::Delete => match docstring::delete_edit(&src, &doc) {
+                        Some(edit) => {
+                            result.deleted += 1;
+                            if cfg.dry_run || cfg.verbose {
+                                progress.print(format!(
+                                    "{}:{line}: delete docstring ({} lines)",
+                                    path.display(),
+                                    doc.end_line - doc.start_line + 1,
+                                ));
+                            }
+                            edits.push(edit);
+                        }
+                        None => result.kept += 1,
+                    },
+                    DocVerdict::Text(t) => match docstring::replace_edit(&src, &doc, &t) {
+                        Some(edit) => {
+                            result.reduced += 1;
+                            if cfg.dry_run || cfg.verbose {
+                                progress.print(format!(
+                                    "{}:{line}: reduce docstring -> {}",
+                                    path.display(),
+                                    t.lines().next().unwrap_or("")
+                                ));
+                            }
+                            edits.push(edit);
+                        }
+                        None => {
+                            progress.warn(format!(
+                                "{}:{line}: left unchanged, unusable LLM reply",
+                                path.display()
+                            ));
+                            result.llm_errors += 1;
+                            result.kept += 1;
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    write_edits(path, &src, edits, cfg, progress, &mut result);
     result
 }
 

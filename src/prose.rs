@@ -1,6 +1,8 @@
 //! Lightweight NLP over comment text: strip delimiters, drop separators / commented-out code,
 //! unwrap paragraphs, split sentences, measure density.
 use crate::types::{CommentBlock, CommentKind, Language};
+use regex::Regex;
+use std::sync::LazyLock;
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, Clone)]
@@ -25,7 +27,9 @@ pub fn clean_lines(block: &CommentBlock, lang: Language) -> Vec<String> {
         match c.kind {
             CommentKind::Line => {
                 let rest = match lang {
-                    Language::Python => c.text.strip_prefix('#').unwrap_or(&c.text),
+                    Language::Python | Language::Yaml => {
+                        c.text.strip_prefix('#').unwrap_or(&c.text)
+                    }
                     _ => c.text.strip_prefix("//").unwrap_or(&c.text),
                 };
                 let rest = rest.trim_start_matches(['/', '!']);
@@ -58,11 +62,45 @@ fn is_separator(line: &str) -> bool {
     t.chars().all(|c| "-=*#~_+/|.".contains(c))
 }
 
+/// A commented-out YAML key (`foo:` / `foo: bar`, no space before the colon) or list item (`- `).
+static YAML_KEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_./-]+:(\s|$)").unwrap());
+
+/// Whether `rest` (the text after a YAML `key:` or `- ` prefix) reads as a short scalar/list
+/// value rather than a full English clause: empty, or at most 6 words with no terminal sentence
+/// punctuation. Ordinary prose that happens to start with a label ("Warning: this value must be
+/// updated...") or a hand-written bullet ("- first check the connection...") fails this, so it
+/// is not mistaken for commented-out YAML.
+fn looks_like_short_yaml_value(rest: &str) -> bool {
+    if rest.is_empty() {
+        return true;
+    }
+    if rest.ends_with(['.', '!', '?']) {
+        return false;
+    }
+    rest.split_whitespace().count() <= 6
+}
+
 /// Small heuristic: does this line look like code rather than English prose?
-fn is_code_like(line: &str) -> bool {
+fn is_code_like(line: &str, lang: Language) -> bool {
     let t = line.trim();
     if t.is_empty() {
         return false;
+    }
+    // YAML-only: commented-out config (a list item or a `key:`/`key: value` line) reads as code,
+    // even though it has none of the JS/Python code punctuation checked below -- but only when
+    // the value/item itself is short, so a "Label: sentence." or "- bullet point." prose line
+    // isn't misclassified just because it happens to share the same prefix shape.
+    if lang == Language::Yaml {
+        if let Some(m) = YAML_KEY_RE.find(t) {
+            if looks_like_short_yaml_value(t[m.end()..].trim()) {
+                return true;
+            }
+        } else if let Some(rest) = t.strip_prefix("- ")
+            && looks_like_short_yaml_value(rest.trim())
+        {
+            return true;
+        }
     }
     if t.ends_with(';') || t.ends_with('{') || t.ends_with('}') {
         return true;
@@ -112,7 +150,7 @@ pub fn analyze(block: &CommentBlock, lang: Language) -> ProseAnalysis {
         if line.trim().is_empty() || is_separator(&line) {
             continue;
         }
-        if is_code_like(&line) {
+        if is_code_like(&line, lang) {
             code_line_count += 1;
         } else {
             prose_lines.push(line);
@@ -186,5 +224,49 @@ mod tests {
             lines,
             vec!["hello world".to_string(), "doc line".to_string()]
         );
+    }
+
+    #[test]
+    fn yaml_commented_out_config_is_code_like() {
+        let block = line_block(&[
+            "# name: myapp",
+            "# image: nginx:latest",
+            "# ports:",
+            "#   - 8080:80",
+        ]);
+        assert!(analyze(&block, Language::Yaml).code_like);
+    }
+
+    #[test]
+    fn yaml_english_prose_is_not_code_like() {
+        let block = line_block(&[
+            "# This service handles incoming requests and forwards them to the",
+            "# appropriate backend based on the path prefix in the URL.",
+        ]);
+        assert!(!analyze(&block, Language::Yaml).code_like);
+    }
+
+    #[test]
+    fn yaml_label_prose_is_not_code_like() {
+        // A "Label: sentence." line shares its prefix shape with a commented-out `key: value`,
+        // but the long, punctuated remainder marks it as English prose, not YAML.
+        let block = line_block(&[
+            "# Warning: this value must be updated whenever the schema changes upstream.",
+            "# The downstream consumer reads this key directly at startup and caches it.",
+            "# If it drifts from the real schema, requests will fail in a confusing way.",
+            "# Always run the validation script after editing this file by hand please.",
+        ]);
+        let a = analyze(&block, Language::Yaml);
+        assert!(!a.code_like);
+        assert_eq!(a.lines.len(), 4, "no line should be dropped as code-like");
+    }
+
+    #[test]
+    fn yaml_bullet_prose_is_not_code_like() {
+        let block = line_block(&[
+            "# - first check the connection before doing anything else in this handler",
+            "# - then verify the credentials actually match the ones on file for the user",
+        ]);
+        assert!(!analyze(&block, Language::Yaml).code_like);
     }
 }

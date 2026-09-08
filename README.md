@@ -2,8 +2,10 @@
 
 # commentreducr
 
-Strips low-value comments from JS/TS/Python in a git repo. Keeps structural comments
-(linter directives, licenses, TODOs). Design notes in [DESIGN.md](DESIGN.md).
+Strips low-value comments from JS/TS/Python/YAML in a git repo, and low-value Python
+docstrings. Keeps structural comments (linter directives, licenses, TODOs) and docstrings
+(doctests, module docstrings a file reads via `__doc__`, click/typer command help, license
+text). Design notes in [DESIGN.md](DESIGN.md).
 
 ## Install
 
@@ -14,44 +16,64 @@ cargo install commentreducr
 ## Usage
 
 ```sh
-commentreducr <path> --delete    # remove all non-structural comments
-commentreducr <path> --reduce    # summarize dense prose blocks to one line (needs an LLM)
+commentreducr comments <path> --delete      # remove all non-structural comments
+commentreducr comments <path> --reduce      # summarize dense prose blocks to one line (needs an LLM)
+commentreducr docstrings <path> --delete    # remove Python docstrings
+commentreducr docstrings <path> --reduce    # rewrite bloated docstrings to the caller's contract (needs an LLM)
 ```
+
+`docstrings` always keeps doctests, a module docstring in a file that reads `__doc__`
+(argparse/click render it as help text), any click/typer command's docstring, and license text
+— in both `--delete` and `--reduce`. `--reduce` aims for a contract, not a story: a test
+function's docstring becomes one or two lines saying what it guards; a test module's becomes
+zero to one short paragraph; everything else gets the contract a caller needs, not a narration
+of the implementation. A docstring shorter than `--min-lines` is left alone.
 
 `--delete --dry-run` counts without writing. `--reduce` fails if the LLM is unreachable;
 otherwise it scans first, then shows progress (percent, blocks, files, time left, token
 counts and throughput) on stderr and prints token totals at the end.
 
 Files that fail to parse are skipped with a warning. To report one, run
-`commentreducr --diagnose <path>` (the repo, a subdirectory or a single file): it parses only,
-touches nothing, and prints a redacted report to stdout (node kinds, positions and line shapes
-with letters and digits masked, no paths or code) that is safe to paste into an issue. The
-path behind each numbered file goes to stderr so you can review it first.
+`commentreducr comments --diagnose <path>` (the repo, a subdirectory or a single file): it
+parses only, touches nothing, and prints a redacted report to stdout (node kinds, positions and
+line shapes with letters and digits masked, no paths or code) that is safe to paste into an
+issue. The path behind each numbered file goes to stderr so you can review it first.
 
 ## LLM for `--reduce`
 
-Any OpenAI-compatible chat endpoint. The prompt is tuned for
-[Gemma 4 E2B](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) (MLX); other
+Any OpenAI-compatible chat endpoint. `comments` defaults to
+[Gemma 4 E2B](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) (MLX), which the
+comment prompt is tuned for. `docstrings` defaults to
+[Gemma 4 26B A4B](https://huggingface.co/mlx-community/gemma-4-26b-a4b-it-4bit): about 4x
+slower per request, but E2B tends to drop the very gotcha a docstring exists to state. Other
 models run but are unmeasured. [oMLX](https://github.com/jundot/omlx) is a good server on
 Apple Silicon since it caches the prompt prefix.
 
 Config in `~/.config/commentreducr/config.toml` (or `--config FILE`). Flags override.
 
 ```toml
-endpoint = "http://localhost:8000/v1"   # default
-model = "gemma-4-e2b-it-4bit"           # default
-api_key = "sk-..."                       # optional
+endpoint = "http://localhost:8000/v1"        # default
+model = "gemma-4-e2b-it-4bit"                # default for comments (and docstrings if docstrings_model is unset)
+docstrings_model = "gemma-4-26b-a4b-it-4bit" # default for docstrings
+api_key = "sk-..."                            # optional
 ```
 
 ## Development
 
 ```sh
 cargo test
-cargo fmt --check && cargo clippy --all-targets -- -D warnings   # CI gate
-cargo run -- --eval tools/dataset/comments.jsonl                 # score the prompt
+cargo fmt --check && cargo clippy --all-targets -- -D warnings       # CI gate
+cargo run -- comments --eval tools/dataset/comments.jsonl            # score the comment prompt
+cargo run -- docstrings --eval tools/dataset/docstrings.jsonl        # score the docstring prompt
+cargo build --release && tools/corpus_check.py /usr/lib/python3.12 ~/some/repo   # never-corrupt check
 ```
 
-PRs only; main requires CI. Prompt rubric in [tools/dataset](tools/dataset).
+PRs only; main requires CI. Both prompts have a labeled dataset and a rubric in
+[tools/dataset](tools/dataset) (the docstring one is
+[docstring_rubric.md](tools/dataset/docstring_rubric.md)); `--eval` prints decision accuracy,
+DELETE precision/recall and token counts so a prompt change can be scored before and after.
+`tools/corpus_check.py` runs `--delete` over any tree and asserts the Python AST (modulo
+docstrings) and every YAML document are unchanged; the stdlib and 1266 real YAML files pass.
 
 ## License
 

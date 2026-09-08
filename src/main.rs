@@ -1,15 +1,31 @@
 use anyhow::{Context, Result};
-use clap::Parser;
-use commentreducr::{Config, Mode, run};
+use clap::{Parser, Subcommand};
+use commentreducr::{Config, Mode, Target, run};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_ENDPOINT: &str = "http://localhost:8000/v1";
 const DEFAULT_MODEL: &str = "gemma-4-e2b-it-4bit";
+/// Docstring rewrites need the bigger model: E2B drops the gotcha a docstring exists to state.
+const DEFAULT_DOC_MODEL: &str = "gemma-4-26b-a4b-it-4bit";
 
-/// Delete or reduce comments in git-tracked Python and JS/TS source files.
+/// Delete or reduce comments (Python, JS/TS, YAML) or Python docstrings in git-tracked files.
 #[derive(Parser, Debug)]
 #[command(name = "commentreducr", version)]
 struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Comments in Python, JS/TS and YAML files
+    Comments(Opts),
+    /// Python docstrings (module, class, function)
+    Docstrings(Opts),
+}
+
+#[derive(clap::Args, Debug)]
+struct Opts {
     /// Directory to process (git-tracked files under it, recursively).
     #[arg(required_unless_present = "eval")]
     path: Option<PathBuf>,
@@ -23,11 +39,11 @@ struct Cli {
     #[arg(long, conflicts_with = "eval")]
     diagnose: bool,
 
-    /// Reduce large dense comment blocks to one line (default).
+    /// Reduce large dense comment/docstring blocks to one line/short text (default).
     #[arg(long, conflicts_with = "delete")]
     reduce: bool,
 
-    /// Delete all non-structural comments.
+    /// Delete all non-structural comments/docstrings.
     #[arg(long)]
     delete: bool,
 
@@ -39,7 +55,8 @@ struct Cli {
     #[arg(long)]
     endpoint: Option<String>,
 
-    /// Model name; the prompt is tuned for Gemma 4 E2B [default: gemma-4-e2b-it-4bit].
+    /// Model name [default: gemma-4-e2b-it-4bit for comments, gemma-4-26b-a4b-it-4bit for
+    /// docstrings].
     #[arg(long)]
     model: Option<String>,
 
@@ -51,15 +68,16 @@ struct Cli {
     #[arg(long, default_value_t = 8)]
     concurrency: usize,
 
-    /// Minimum prose lines for a block to be reduced.
+    /// Minimum prose lines (comments) or non-blank docstring lines (docstrings) for a block to
+    /// be reduced.
     #[arg(long, default_value_t = 4)]
     min_lines: usize,
 
-    /// Minimum average words per line for a block to be reduced.
+    /// (comments only) Minimum average words per line for a block to be reduced.
     #[arg(long, default_value_t = 5.0)]
     min_density: f64,
 
-    /// Target max words in a summary.
+    /// (comments only) Target max words in a summary.
     #[arg(long, default_value_t = 20)]
     max_words: usize,
 
@@ -76,6 +94,8 @@ struct Cli {
 struct FileConfig {
     endpoint: Option<String>,
     model: Option<String>,
+    /// Model for the docstrings subcommand; falls back to `model`, then the built-in default.
+    docstrings_model: Option<String>,
     api_key: Option<String>,
 }
 
@@ -100,36 +120,63 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     // Panics inside a worker are caught and reported as warnings; keep the default hook quiet.
     std::panic::set_hook(Box::new(|_| {}));
-    let file = load_file_config(&cli.config)?;
+    let (target, opts) = match &cli.command {
+        Command::Comments(o) => (Target::Comments, o),
+        Command::Docstrings(o) => (Target::Docstrings, o),
+    };
+    // clap's `requires = "delete"` on --dry-run only fires against the arguments actually typed,
+    // so `--reduce --dry-run` (an explicit --reduce, rather than --reduce's absence) sails past
+    // it and would otherwise run the full reduce pipeline -- including live LLM calls -- with
+    // only the final write suppressed. Reduce mode does not support dry-run at all; check the
+    // resolved flag instead of trusting clap to have rejected every shape of this combination.
+    if opts.dry_run && !opts.delete {
+        anyhow::bail!("--dry-run only applies to --delete");
+    }
+    let file = load_file_config(&opts.config)?;
     let cfg = Config {
-        mode: if cli.delete {
+        target,
+        mode: if opts.delete {
             Mode::Delete
         } else {
             Mode::Reduce
         },
-        min_lines: cli.min_lines,
-        min_density: cli.min_density,
-        max_summary_words: cli.max_words,
-        endpoint: cli
+        min_lines: opts.min_lines,
+        min_density: opts.min_density,
+        max_summary_words: opts.max_words,
+        endpoint: opts
             .endpoint
+            .clone()
             .or(file.endpoint)
             .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string()),
-        model: cli
+        model: opts
             .model
-            .or(file.model)
-            .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
-        api_key: cli.api_key.or(file.api_key),
-        llm_concurrency: cli.concurrency,
-        dry_run: cli.dry_run,
-        verbose: cli.verbose,
+            .clone()
+            .or(match target {
+                Target::Comments => file.model,
+                Target::Docstrings => file.docstrings_model.or(file.model),
+            })
+            .unwrap_or_else(|| {
+                match target {
+                    Target::Comments => DEFAULT_MODEL,
+                    Target::Docstrings => DEFAULT_DOC_MODEL,
+                }
+                .to_string()
+            }),
+        api_key: opts.api_key.clone().or(file.api_key),
+        llm_concurrency: opts.concurrency,
+        dry_run: opts.dry_run,
+        verbose: opts.verbose,
     };
-    if let Some(dataset) = &cli.eval {
-        return commentreducr::eval::run(dataset, &cfg);
+    if let Some(dataset) = &opts.eval {
+        return match target {
+            Target::Comments => commentreducr::eval::run(dataset, &cfg),
+            Target::Docstrings => commentreducr::eval::run_docstrings(dataset, &cfg),
+        };
     }
-    let path = cli.path.as_deref().unwrap();
-    if cli.diagnose {
+    let path = opts.path.as_deref().unwrap();
+    if opts.diagnose {
         println!("commentreducr {}", env!("CARGO_PKG_VERSION"));
-        let bad = commentreducr::diagnose(path)?;
+        let bad = commentreducr::diagnose(path, target)?;
         eprintln!("{bad} files with parse errors");
         if bad > 0 {
             std::process::exit(1);
@@ -137,8 +184,12 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let stats = run(path, &cfg)?;
+    let noun = match target {
+        Target::Comments => "comments",
+        Target::Docstrings => "docstrings",
+    };
     eprintln!(
-        "{} files scanned, {} changed, {} skipped; comments: {} kept, {} deleted, {} reduced, {} LLM failures",
+        "{} files scanned, {} changed, {} skipped; {noun}: {} kept, {} deleted, {} reduced, {} LLM failures",
         stats.files_scanned,
         stats.files_changed,
         stats.files_skipped,
@@ -172,8 +223,13 @@ mod tests {
         std::fs::write(&path, "model = \"m\"\napi_key = \"k\"\n").unwrap();
         let c = load_file_config(&path).unwrap();
         assert_eq!(
-            (c.model.as_deref(), c.api_key.as_deref(), c.endpoint),
-            (Some("m"), Some("k"), None)
+            (
+                c.model.as_deref(),
+                c.api_key.as_deref(),
+                c.endpoint,
+                c.docstrings_model
+            ),
+            (Some("m"), Some("k"), None, None)
         );
         std::fs::write(&path, "model = ").unwrap();
         assert!(load_file_config(&path).is_err());

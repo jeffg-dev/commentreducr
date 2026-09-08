@@ -45,6 +45,7 @@ mod tests {
 
     fn cfg(mode: Mode) -> Config {
         Config {
+            target: crate::types::Target::Comments,
             mode,
             min_lines: 2,
             min_density: 3.0,

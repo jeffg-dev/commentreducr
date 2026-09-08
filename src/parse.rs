@@ -1,6 +1,7 @@
-//! tree-sitter based comment extraction. Comments are `comment` nodes in all four grammars;
-//! strings, template literals, regex literals, JSX text and Python docstrings are never comments,
-//! so the grammar does the hard work for us.
+//! tree-sitter based comment extraction. Comments are `comment` nodes in all five grammars;
+//! strings, template literals, regex literals, JSX text, Python docstrings, and YAML block/quoted
+//! scalars are never comments, so the grammar does the hard work for us.
+use crate::rewrite::{line_end, line_start};
 use crate::types::{Comment, CommentBlock, CommentKind, Language};
 use anyhow::{Result, anyhow};
 use regex::Regex;
@@ -13,25 +14,8 @@ fn ts_language(lang: Language) -> tree_sitter::Language {
         Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
         Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
     }
-}
-
-/// Byte offset of the start of the line containing `pos`.
-fn line_start(src: &str, pos: usize) -> usize {
-    src.as_bytes()[..pos]
-        .iter()
-        .rposition(|&b| b == b'\n')
-        .map(|i| i + 1)
-        .unwrap_or(0)
-}
-
-/// Byte offset of the end of the line containing `pos` (the newline itself, or EOF).
-fn line_end(src: &str, pos: usize) -> usize {
-    src.as_bytes()[pos..]
-        .iter()
-        .position(|&b| b == b'\n')
-        .map(|i| pos + i)
-        .unwrap_or(src.len())
 }
 
 /// The whitespace run at the start of the line containing `pos`, up to the first non-whitespace
@@ -364,5 +348,48 @@ function App() {
         assert_eq!(blocks[1].kind, CommentKind::Line);
         assert!(!blocks[1].own_line);
         assert!(!blocks[1].code_after);
+    }
+
+    #[test]
+    fn yaml_scalars_are_not_comments() {
+        let src = r##"# top comment line one
+# top comment line two
+key: value  # trailing comment
+block: |
+  echo hi
+  # not a comment
+quoted: "# not a comment"
+plain: a#b
+items:
+  - one
+  # comment inside sequence
+  - two
+---
+doc2: true
+"##;
+        assert!(diagnose(src, Language::Yaml).unwrap().is_none());
+        let comments = extract_comments(src, Language::Yaml).unwrap();
+        let texts: Vec<&str> = comments.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "# top comment line one",
+                "# top comment line two",
+                "# trailing comment",
+                "# comment inside sequence",
+            ]
+        );
+        for c in &comments {
+            assert_eq!(&src[c.start..c.end], c.text, "offsets must index src");
+        }
+
+        let blocks = group_blocks(src, comments);
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].comments.len(), 2);
+        assert!(blocks[0].own_line);
+        assert_eq!(blocks[1].comments.len(), 1);
+        assert!(!blocks[1].own_line);
+        assert_eq!(blocks[2].comments.len(), 1);
+        assert!(blocks[2].own_line);
     }
 }

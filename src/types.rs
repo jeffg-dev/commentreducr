@@ -7,6 +7,7 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Tsx,
+    Yaml,
 }
 
 impl Language {
@@ -16,6 +17,7 @@ impl Language {
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
             "ts" | "mts" | "cts" => Some(Language::TypeScript),
             "tsx" => Some(Language::Tsx),
+            "yml" | "yaml" => Some(Language::Yaml),
             _ => None,
         }
     }
@@ -23,7 +25,7 @@ impl Language {
     /// Prefix used when emitting a single-line comment.
     pub fn line_prefix(self) -> &'static str {
         match self {
-            Language::Python => "#",
+            Language::Python | Language::Yaml => "#",
             _ => "//",
         }
     }
@@ -83,6 +85,13 @@ pub enum Mode {
     Delete,
 }
 
+/// What a run processes: comments (all supported languages) or Python docstrings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Comments,
+    Docstrings,
+}
+
 /// Decision for one block.
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -96,8 +105,10 @@ pub enum Action {
 
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub target: Target,
     pub mode: Mode,
-    /// Blocks with fewer cleaned prose lines than this are kept in reduce mode.
+    /// Blocks with fewer cleaned prose lines than this are kept in reduce mode (comments), or
+    /// docstrings with fewer non-blank text lines than this are kept in reduce mode (docstrings).
     pub min_lines: usize,
     /// Blocks averaging fewer words per prose line than this are kept in reduce mode (low density).
     pub min_density: f64,

@@ -1,6 +1,6 @@
 [package]
 name = "commentreducr"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Strip low-value comments and docstrings from a JS/TS/Python/YAML codebase, keeping structural ones"

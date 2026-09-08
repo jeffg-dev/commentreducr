@@ -146,10 +146,10 @@ cargo run -- docstrings --eval tools/dataset/docstrings.jsonl
 
 Measured 2026-09-08 against oMLX, 8 requests in flight:
 
-| model                     | decision accuracy | DELETE precision / recall | kept avg lines / words | wall (58 rows) |
+| model                     | decision accuracy | DELETE precision / recall | kept avg lines / words | wall (60 rows) |
 |---------------------------|------------------:|--------------------------:|-----------------------:|---------------:|
-| `gemma-4-e2b-it-4bit`     |             86.2% |             88.6% / 88.6% |             1.7 / 18.2 |           14 s |
-| `gemma-4-26b-a4b-it-4bit` |             87.9% |             86.8% / 94.3% |             3.1 / 27.4 |           56 s |
+| `gemma-4-e2b-it-4bit`     |             85.0% |             91.2% / 83.8% |             1.9 / 19.4 |          ~15 s |
+| `gemma-4-26b-a4b-it-4bit` |             90.0% |             87.8% / 97.3% |             2.9 / 26.7 |          ~55 s |
 
 The decisions tie, but E2B's rewrites tend to drop the one gotcha the docstring exists to
 state, so `docstrings` defaults to the 26B model (`docstrings_model` in the config file).

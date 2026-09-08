@@ -238,8 +238,6 @@ checksum = "659579df697b372ef9e36f02fcbb41f6d6f157dcec7db9c9618fa0f23cf0fc20"
 dependencies = [
  "rustls",
  "rustls-webpki",
- "serde",
- "serde_json",
  "webpki-roots",
 ]
 

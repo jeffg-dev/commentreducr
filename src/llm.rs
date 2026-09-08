@@ -475,6 +475,18 @@ struct ChatMessage {
     content: String,
 }
 
+/// Fails with a clear message if `endpoint` needs HTTPS but this build lacks the `tls` feature
+/// (which pulls in rustls). A pure function of the URL, so it's cheap to unit test.
+fn require_tls_support(endpoint: &str) -> Result<()> {
+    if !cfg!(feature = "tls") && endpoint.starts_with("https://") {
+        bail!(
+            "endpoint {endpoint} needs HTTPS support: reinstall with \
+             `cargo install commentreducr --features tls`"
+        );
+    }
+    Ok(())
+}
+
 impl LlmClient {
     pub fn new(cfg: &Config) -> LlmClient {
         let endpoint = cfg.endpoint.trim_end_matches('/').to_string();
@@ -488,6 +500,7 @@ impl LlmClient {
 
     /// Preflight: one tiny completion to prove the endpoint is reachable and the model loads.
     pub fn check(&self) -> Result<()> {
+        require_tls_support(&self.endpoint)?;
         let body = json!({
             "model": self.model,
             "messages": [{"role": "user", "content": "hi"}],
@@ -621,10 +634,11 @@ impl LlmClient {
     }
 
     fn post(&self, url: &str, body: &serde_json::Value) -> Result<String> {
+        let payload = serde_json::to_vec(body).context("encoding LLM request")?;
         let mut req = minreq::post(url)
             .with_timeout(60)
-            .with_json(body)
-            .context("encoding LLM request")?;
+            .with_header("Content-Type", "application/json; charset=UTF-8")
+            .with_body(payload);
         if let Some(key) = &self.api_key {
             req = req.with_header("Authorization", format!("Bearer {key}"));
         }
@@ -636,7 +650,8 @@ impl LlmClient {
                 resp.reason_phrase
             );
         }
-        let parsed: ChatResponse = resp.json().context("failed to parse LLM response")?;
+        let parsed: ChatResponse =
+            serde_json::from_slice(resp.as_bytes()).context("failed to parse LLM response")?;
         if let Some(u) = &parsed.usage {
             self.tokens.requests.fetch_add(1, Ordering::Relaxed);
             self.tokens
@@ -1097,6 +1112,17 @@ mod tests {
             };
             assert_eq!(verdict, expected, "demo {name:?} did not round-trip");
         }
+    }
+
+    #[cfg(not(feature = "tls"))]
+    #[test]
+    fn https_endpoint_without_tls_feature_fails_with_a_clear_message() {
+        assert!(require_tls_support("http://127.0.0.1:1/v1").is_ok());
+        let err = require_tls_support("https://api.example.com/v1").unwrap_err();
+        assert!(
+            err.to_string().contains("--features tls"),
+            "message was: {err}"
+        );
     }
 
     #[test]

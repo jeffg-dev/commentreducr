@@ -139,7 +139,7 @@ struct Opts {
 }
 
 /// Optional settings from the config file; flags override these.
-#[derive(serde::Deserialize, Default)]
+#[derive(Default)]
 struct FileConfig {
     endpoint: Option<String>,
     model: Option<String>,
@@ -150,6 +150,129 @@ struct FileConfig {
     min_lines: Option<usize>,
     min_density: Option<f64>,
     max_words: Option<usize>,
+}
+
+/// One value parsed from a config line: a quoted string, or a bare token kept as text so the
+/// caller can parse it as the field's own type (`usize` vs `f64`).
+enum ConfigValue {
+    Str(String),
+    Num(String),
+}
+
+/// Parses the flat `key = value` subset of TOML documented in the README: one statement per
+/// line, no sections, no arrays, no multi-line values. Unknown keys are ignored, matching the
+/// old serde-based parser, so a config written for a newer version still loads.
+fn parse_config(text: &str) -> Result<FileConfig> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let mut cfg = FileConfig::default();
+    let mut seen = std::collections::HashSet::new();
+    for (i, raw_line) in text.lines().enumerate() {
+        let lineno = i + 1;
+        let line = raw_line.trim_start();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            anyhow::bail!("line {lineno}: sections are not supported");
+        }
+        let Some(eq) = line.find('=') else {
+            anyhow::bail!("line {lineno}: expected key = value");
+        };
+        let key = line[..eq].trim_end();
+        if key.is_empty()
+            || !key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            anyhow::bail!("line {lineno}: expected key = value");
+        }
+        if !seen.insert(key.to_string()) {
+            anyhow::bail!("line {lineno}: duplicate key {key}");
+        }
+        let (value, rest) = parse_config_value(line[eq + 1..].trim_start(), lineno)?;
+        let rest = rest.trim_start();
+        if !rest.is_empty() && !rest.starts_with('#') {
+            anyhow::bail!("line {lineno}: unexpected trailing content");
+        }
+        assign_config_value(&mut cfg, key, value, lineno)?;
+    }
+    Ok(cfg)
+}
+
+/// Parses one value (a quoted string or a bare number) from the start of `s`, returning it
+/// along with whatever text follows it on the line.
+fn parse_config_value(s: &str, lineno: usize) -> Result<(ConfigValue, &str)> {
+    let Some(rest) = s.strip_prefix('"') else {
+        // Bare token up to whitespace or a comment; the field's own type parses it.
+        let end = s
+            .find(|c: char| c.is_whitespace() || c == '#')
+            .unwrap_or(s.len());
+        if end == 0 {
+            anyhow::bail!("line {lineno}: expected key = value");
+        }
+        return Ok((ConfigValue::Num(s[..end].to_string()), &s[end..]));
+    };
+    let mut out = String::new();
+    let mut chars = rest.char_indices();
+    while let Some((idx, c)) = chars.next() {
+        match c {
+            '"' => return Ok((ConfigValue::Str(out), &rest[idx + 1..])),
+            '\\' => match chars.next() {
+                Some((_, '\\')) => out.push('\\'),
+                Some((_, '"')) => out.push('"'),
+                Some((_, 'n')) => out.push('\n'),
+                Some((_, 't')) => out.push('\t'),
+                Some((_, 'r')) => out.push('\r'),
+                Some((_, other)) => anyhow::bail!("line {lineno}: invalid escape \\{other}"),
+                None => anyhow::bail!("line {lineno}: unterminated string"),
+            },
+            other => out.push(other),
+        }
+    }
+    anyhow::bail!("line {lineno}: unterminated string")
+}
+
+/// Applies one parsed value to the matching known field; unknown keys are ignored.
+fn assign_config_value(
+    cfg: &mut FileConfig,
+    key: &str,
+    value: ConfigValue,
+    lineno: usize,
+) -> Result<()> {
+    fn as_str(key: &str, value: ConfigValue, lineno: usize) -> Result<String> {
+        match value {
+            ConfigValue::Str(s) => Ok(s),
+            ConfigValue::Num(_) => anyhow::bail!("line {lineno}: {key} expects a string"),
+        }
+    }
+    fn as_usize(key: &str, value: ConfigValue, lineno: usize) -> Result<usize> {
+        match value {
+            ConfigValue::Num(n) => n
+                .parse()
+                .map_err(|_| anyhow::anyhow!("line {lineno}: {key} expects a whole number")),
+            ConfigValue::Str(_) => anyhow::bail!("line {lineno}: {key} expects a number"),
+        }
+    }
+    fn as_f64(key: &str, value: ConfigValue, lineno: usize) -> Result<f64> {
+        match value {
+            ConfigValue::Num(n) => n
+                .parse()
+                .map_err(|_| anyhow::anyhow!("line {lineno}: {key} expects a number")),
+            ConfigValue::Str(_) => anyhow::bail!("line {lineno}: {key} expects a number"),
+        }
+    }
+    match key {
+        "endpoint" => cfg.endpoint = Some(as_str(key, value, lineno)?),
+        "model" => cfg.model = Some(as_str(key, value, lineno)?),
+        "docstrings_model" => cfg.docstrings_model = Some(as_str(key, value, lineno)?),
+        "api_key" => cfg.api_key = Some(as_str(key, value, lineno)?),
+        "workers" => cfg.workers = Some(as_usize(key, value, lineno)?),
+        "min_lines" => cfg.min_lines = Some(as_usize(key, value, lineno)?),
+        "max_words" => cfg.max_words = Some(as_usize(key, value, lineno)?),
+        "min_density" => cfg.min_density = Some(as_f64(key, value, lineno)?),
+        _ => {}
+    }
+    Ok(())
 }
 
 fn default_config_path() -> PathBuf {
@@ -163,7 +286,7 @@ fn default_config_path() -> PathBuf {
 /// A missing file is fine (all defaults); a present but malformed one is an error.
 fn load_file_config(path: &Path) -> Result<FileConfig> {
     match std::fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).with_context(|| format!("bad config {}", path.display())),
+        Ok(text) => parse_config(&text).with_context(|| format!("bad config {}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(FileConfig::default()),
         Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
     }
@@ -307,5 +430,44 @@ mod tests {
         std::fs::write(&path, "model = ").unwrap();
         assert!(load_file_config(&path).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_config_readme_example_and_errors() {
+        // The README's example config, verbatim.
+        let readme = r#"
+endpoint = "http://localhost:8000/v1"        # default
+model = "gemma-4-e2b-it-4bit"                # default for comments (and docstrings if docstrings_model is unset)
+docstrings_model = "gemma-4-26b-a4b-it-4bit" # default for docstrings
+api_key = "sk-..."                            # optional
+workers = 8                                   # worker threads / max in-flight LLM requests, default 8
+min_lines = 4                                 # minimum lines in a block before it's reduced, default 4
+min_density = 5.0                             # comments only: minimum average words per line, default 5
+max_words = 20                                # comments only: target max words in a summary, default 20
+"#;
+        let c = parse_config(readme).unwrap();
+        assert_eq!(c.endpoint.as_deref(), Some("http://localhost:8000/v1"));
+        assert_eq!(c.model.as_deref(), Some("gemma-4-e2b-it-4bit"));
+        assert_eq!(
+            c.docstrings_model.as_deref(),
+            Some("gemma-4-26b-a4b-it-4bit")
+        );
+        assert_eq!(c.api_key.as_deref(), Some("sk-..."));
+        assert_eq!(c.workers, Some(8));
+        assert_eq!(c.min_lines, Some(4));
+        assert_eq!(c.min_density, Some(5.0));
+        assert_eq!(c.max_words, Some(20));
+
+        // escaped quote inside a string
+        let c = parse_config(r#"model = "a \"quoted\" name""#).unwrap();
+        assert_eq!(c.model.as_deref(), Some("a \"quoted\" name"));
+
+        // unknown keys are ignored, like the old serde-based parser
+        assert!(parse_config("nonsense = \"x\"\n").unwrap().model.is_none());
+
+        // errors: duplicate key, a [section] header, a string for a numeric key
+        assert!(parse_config("model = \"a\"\nmodel = \"b\"\n").is_err());
+        assert!(parse_config("[section]\n").is_err());
+        assert!(parse_config("min_lines = \"two\"\n").is_err());
     }
 }

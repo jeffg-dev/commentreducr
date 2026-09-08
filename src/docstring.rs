@@ -300,7 +300,10 @@ fn make_docstring(
     let ls = line_start(src, start);
     let own_line = src[ls..start].chars().all(char::is_whitespace);
     let le = line_end(src, end);
-    let code_after = !src[end..le].trim().is_empty();
+    // After a complete string statement a `#` can only start a comment, which goes with the
+    // docstring (`"""  # noqa`), so it does not count as code.
+    let rest = src[end..le].trim();
+    let code_after = !rest.is_empty() && !rest.starts_with('#');
     let indent = src[ls..start].to_string();
 
     let mut raw_content = String::new();
@@ -769,6 +772,13 @@ def outer():
         assert_eq!(docs.len(), 1);
         assert!(!docs[0].only_statement);
         assert!(delete_edit(src, &docs[0]).is_none());
+
+        // A trailing comment on the closing line is not code: the docstring goes, comment and all.
+        let src = "\"\"\"Doc.\n\"\"\"  # noqa\nimport os\n";
+        let docs = extract_docstrings(src, false).unwrap();
+        assert!(!docs[0].code_after);
+        let out = rewrite::apply(src, vec![delete_edit(src, &docs[0]).unwrap()]);
+        assert_eq!(out, "import os\n");
     }
 
     #[test]

@@ -86,6 +86,8 @@ real "bad" test module supplied for this task (never copied verbatim).
 
 ### Rubric
 
+The full rubric, with real good / bad / no-docstring examples, is
+[docstring_rubric.md](docstring_rubric.md); the labels and the prompt's demos follow it.
 Test code is different from everything else:
 
 - A test function or method docstring says what it guards or tests, in one or two lines.
@@ -140,6 +142,17 @@ in bloat, the label keeps only that fact, terse, no story.
 ```
 cargo run -- docstrings --eval tools/dataset/docstrings.jsonl
 ```
+
+Measured 2026-09-08 against oMLX, 8 requests in flight:
+
+| model                     | decision accuracy | DELETE precision / recall | kept avg lines / words | wall (58 rows) |
+|---------------------------|------------------:|--------------------------:|-----------------------:|---------------:|
+| `gemma-4-e2b-it-4bit`     |             86.2% |             88.6% / 88.6% |             1.7 / 18.2 |           14 s |
+| `gemma-4-26b-a4b-it-4bit` |             87.9% |             86.8% / 94.3% |             3.1 / 27.4 |           56 s |
+
+The decisions tie, but E2B's rewrites tend to drop the one gotcha the docstring exists to
+state, so `docstrings` defaults to the 26B model (`docstrings_model` in the config file).
+For reference the comment prompt on the same server: E2B 86.7%, 26B 94.2% on the 120-row set.
 
 Prints per-row `ok`/`MISS` (expected label vs. the first line of what the model returned), then
 decision accuracy, `DELETE` precision/recall, and — for rows the model decided to keep — the

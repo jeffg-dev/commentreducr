@@ -65,9 +65,15 @@ cargo test
 cargo fmt --check && cargo clippy --all-targets -- -D warnings       # CI gate
 cargo run -- comments --eval tools/dataset/comments.jsonl            # score the comment prompt
 cargo run -- docstrings --eval tools/dataset/docstrings.jsonl        # score the docstring prompt
+cargo build --release && tools/corpus_check.py /usr/lib/python3.12 ~/some/repo   # never-corrupt check
 ```
 
-PRs only; main requires CI. Prompt rubric in [tools/dataset](tools/dataset).
+PRs only; main requires CI. Both prompts have a labeled dataset and a rubric in
+[tools/dataset](tools/dataset) (the docstring one is
+[docstring_rubric.md](tools/dataset/docstring_rubric.md)); `--eval` prints decision accuracy,
+DELETE precision/recall and token counts so a prompt change can be scored before and after.
+`tools/corpus_check.py` runs `--delete` over any tree and asserts the Python AST (modulo
+docstrings) and every YAML document are unchanged; the stdlib and 1266 real YAML files pass.
 
 ## License
 

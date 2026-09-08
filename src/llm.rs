@@ -475,18 +475,6 @@ struct ChatMessage {
     content: String,
 }
 
-/// Fails with a clear message if `endpoint` needs HTTPS but this build lacks the `tls` feature
-/// (which pulls in rustls). A pure function of the URL, so it's cheap to unit test.
-fn require_tls_support(endpoint: &str) -> Result<()> {
-    if !cfg!(feature = "tls") && endpoint.starts_with("https://") {
-        bail!(
-            "endpoint {endpoint} needs HTTPS support: reinstall with \
-             `cargo install commentreducr --features tls`"
-        );
-    }
-    Ok(())
-}
-
 impl LlmClient {
     pub fn new(cfg: &Config) -> LlmClient {
         let endpoint = cfg.endpoint.trim_end_matches('/').to_string();
@@ -500,7 +488,6 @@ impl LlmClient {
 
     /// Preflight: one tiny completion to prove the endpoint is reachable and the model loads.
     pub fn check(&self) -> Result<()> {
-        require_tls_support(&self.endpoint)?;
         let body = json!({
             "model": self.model,
             "messages": [{"role": "user", "content": "hi"}],
@@ -1112,17 +1099,6 @@ mod tests {
             };
             assert_eq!(verdict, expected, "demo {name:?} did not round-trip");
         }
-    }
-
-    #[cfg(not(feature = "tls"))]
-    #[test]
-    fn https_endpoint_without_tls_feature_fails_with_a_clear_message() {
-        assert!(require_tls_support("http://127.0.0.1:1/v1").is_ok());
-        let err = require_tls_support("https://api.example.com/v1").unwrap_err();
-        assert!(
-            err.to_string().contains("--features tls"),
-            "message was: {err}"
-        );
     }
 
     #[test]

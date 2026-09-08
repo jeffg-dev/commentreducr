@@ -30,7 +30,10 @@ pub struct Docstring {
     /// 0-based.
     pub start_line: usize,
     pub end_line: usize,
-    /// Leading whitespace of the line the string starts on.
+    /// Text from the start of the docstring's line up to its opening quote: pure whitespace when
+    /// `own_line`, otherwise it also holds the preceding code (e.g. `def probe(self): ` for an
+    /// inline docstring). Only reused as an indent by `replace_edit`'s multi-line branch, which
+    /// refuses to run at all when `!own_line`.
     pub indent: String,
     pub kind: DocKind,
     /// def/class name; "" for Module.
@@ -526,13 +529,27 @@ pub fn delete_edit(src: &str, doc: &Docstring) -> Option<Edit> {
 
 /// Edit that replaces `doc`'s text with `new_text` (lines already joined with "\n", already
 /// trimmed), keeping the original prefix and quote. `None` if `new_text` is empty or would be
-/// unsafe to splice in verbatim (it contains the quote sequence itself, or a backslash).
+/// unsafe to splice in verbatim: it contains the quote sequence itself, a backslash, or ends in
+/// the quote's delimiter character (which would combine with the closing quote we append and
+/// close the string early, e.g. a reply ending `raw"` next to a `"""` docstring). `None` too for
+/// a multi-line reply when the docstring is not `own_line`: there is no whitespace-only indent
+/// to reuse for its continuation/closing lines (code shares the line instead, e.g.
+/// `def probe(self): """x"""`), so splicing one in would duplicate that code into the text.
 pub fn replace_edit(_src: &str, doc: &Docstring, new_text: &str) -> Option<Edit> {
-    if new_text.is_empty() || new_text.contains(doc.quote.as_str()) || new_text.contains('\\') {
+    let quote_char = doc.quote.chars().next().unwrap_or_default();
+    if new_text.is_empty()
+        || new_text.contains(doc.quote.as_str())
+        || new_text.contains('\\')
+        || new_text.ends_with(quote_char)
+    {
         return None;
     }
 
     let doc_lines: Vec<&str> = new_text.split('\n').collect();
+    if doc_lines.len() > 1 && !doc.own_line {
+        return None;
+    }
+
     let mut replacement = String::new();
     replacement.push_str(&doc.prefix);
     replacement.push_str(&doc.quote);
@@ -811,6 +828,33 @@ def outer():
         assert!(replace_edit(src, &docs[0], "").is_none());
         assert!(replace_edit(src, &docs[0], "has \"\"\" inside").is_none());
         assert!(replace_edit(src, &docs[0], "has \\ inside").is_none());
+    }
+
+    #[test]
+    fn replace_edit_refuses_new_text_ending_in_the_quote_char() {
+        // A reply ending in a single quote char would combine with the closing delimiter we
+        // append right after it, forming a longer run than intended and closing the string
+        // early -- leaving a dangling extra quote character the tokenizer never expects.
+        let src = "def f():\n    \"\"\"old\"\"\"\n";
+        let docs = extract_docstrings(src, false).unwrap();
+        assert!(replace_edit(src, &docs[0], "Ends with quote\"").is_none());
+
+        let src = "def f():\n    '''old'''\n";
+        let docs = extract_docstrings(src, false).unwrap();
+        assert!(replace_edit(src, &docs[0], "Uses the value 'raw'").is_none());
+    }
+
+    #[test]
+    fn replace_edit_refuses_multiline_when_docstring_shares_its_line_with_code() {
+        // No whitespace-only indent exists to reuse for continuation/closing lines when code
+        // (`def probe(self): `) precedes the docstring on its own line; splicing a multi-line
+        // reply in would duplicate that code into the docstring's text.
+        let src = "class C:\n    def probe(self): \"\"\"old\"\"\"\n";
+        let docs = extract_docstrings(src, false).unwrap();
+        assert!(!docs[0].own_line);
+        assert!(replace_edit(src, &docs[0], "First line.\nSecond line.").is_none());
+        // A single-line reply is unaffected: nothing needs the indent.
+        assert!(replace_edit(src, &docs[0], "One line only").is_some());
     }
 
     #[test]

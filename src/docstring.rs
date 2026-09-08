@@ -8,7 +8,7 @@
 //! `decorator` children are the decorators and whose `definition` field is the real node). A
 //! `string` node with an `f`/`F`/`b`/`B` anywhere in its prefix is a formatted or byte string, not
 //! a docstring; only `r`/`R`/`u`/`U` (or no prefix) qualify.
-use crate::rewrite::Edit;
+use crate::rewrite::{Edit, line_end, line_end_incl_terminator, line_start};
 use anyhow::{Result, anyhow};
 use regex::Regex;
 use std::path::{Component, Path};
@@ -248,33 +248,6 @@ fn is_docstring_prefix(prefix: &str) -> bool {
     prefix.chars().all(|c| matches!(c, 'r' | 'R' | 'u' | 'U'))
 }
 
-/// Byte offset of the start of the line containing `pos`.
-fn line_start(src: &str, pos: usize) -> usize {
-    src.as_bytes()[..pos]
-        .iter()
-        .rposition(|&b| b == b'\n')
-        .map(|i| i + 1)
-        .unwrap_or(0)
-}
-
-/// Byte offset of the end of the line containing `pos` (the newline itself, or EOF).
-fn line_end(src: &str, pos: usize) -> usize {
-    src.as_bytes()[pos..]
-        .iter()
-        .position(|&b| b == b'\n')
-        .map(|i| pos + i)
-        .unwrap_or(src.len())
-}
-
-/// Byte offset just past the terminator of the line containing `pos`, or EOF if that line has no
-/// terminator.
-fn line_end_incl_terminator(src: &str, pos: usize) -> usize {
-    match src.as_bytes()[pos..].iter().position(|&b| b == b'\n') {
-        Some(i) => pos + i + 1,
-        None => src.len(),
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn make_docstring(
     string_node: Node,
@@ -492,35 +465,26 @@ pub fn delete_edit(src: &str, doc: &Docstring) -> Option<Edit> {
         return None;
     }
 
-    let mut start = doc.start - doc.indent.len();
+    let start = doc.start - doc.indent.len();
     let last_pos = doc.end.saturating_sub(1).max(doc.start);
     let mut end = line_end_incl_terminator(src, last_pos);
-    let hit_eof = end == src.len() && !src[..end].ends_with('\n');
 
-    if hit_eof {
-        // No terminator on the last line; remove through EOF, and also strip the terminator
-        // preceding our span so we don't leave a dangling blank line.
-        if start > 0 && src.as_bytes()[start - 1] == b'\n' {
-            let mut new_start = start - 1;
-            if new_start > 0 && src.as_bytes()[new_start - 1] == b'\r' {
-                new_start -= 1;
-            }
-            start = new_start;
+    // Unlike rewrite::delete_edit, there is no EOF-without-terminator case to handle here: an
+    // only_statement=false docstring always has a later sibling statement in the same
+    // module/class/function body, positioned after it in the source, so its own line is
+    // guaranteed a real terminator before EOF -- the one shape that could put that sibling on
+    // the docstring's own last line (`code_after`) is already refused above.
+    // Consume every immediately-following blank line so the body/module doesn't start blank.
+    loop {
+        let next_end = line_end_incl_terminator(src, end);
+        if next_end == end {
+            break;
         }
-        end = src.len();
-    } else {
-        // Consume every immediately-following blank line so the body/module doesn't start blank.
-        loop {
-            let next_end = line_end_incl_terminator(src, end);
-            if next_end == end {
-                break;
-            }
-            let line_text = &src[end..next_end];
-            if line_text.trim().is_empty() {
-                end = next_end;
-            } else {
-                break;
-            }
+        let line_text = &src[end..next_end];
+        if line_text.trim().is_empty() {
+            end = next_end;
+        } else {
+            break;
         }
     }
 
@@ -768,39 +732,6 @@ def outer():
         let edit = delete_edit(src, &docs[0]).unwrap();
         let out = rewrite::apply(src, vec![edit]);
         assert_eq!(out, "import os\r\n");
-    }
-
-    #[test]
-    fn delete_edit_at_eof_without_terminator() {
-        // Not a real docstring (it's the block's second statement) -- built by hand to exercise
-        // delete_edit's own-line-at-EOF branch, which mirrors rewrite::delete_edit's hit_eof
-        // handling: strip the terminator before the span too, so no dangling blank line is left.
-        let src = "class C:\n    x = 1\n    \"\"\"doc\"\"\"";
-        let start = src.rfind("\"\"\"doc\"\"\"").unwrap();
-        let doc = Docstring {
-            start,
-            end: src.len(),
-            start_line: 2,
-            end_line: 2,
-            indent: "    ".to_string(),
-            kind: DocKind::Class,
-            name: String::new(),
-            signature: String::new(),
-            decorators: Vec::new(),
-            is_test: false,
-            in_test_file: false,
-            only_statement: false,
-            own_line: true,
-            code_after: false,
-            prefix: String::new(),
-            quote: "\"\"\"".to_string(),
-            text: "doc".to_string(),
-            body_preview: Vec::new(),
-            body_lines: 0,
-        };
-        let edit = delete_edit(src, &doc).unwrap();
-        let out = rewrite::apply(src, vec![edit]);
-        assert_eq!(out, "class C:\n    x = 1");
     }
 
     #[test]

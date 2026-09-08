@@ -1,6 +1,7 @@
 //! tree-sitter based comment extraction. Comments are `comment` nodes in all five grammars;
 //! strings, template literals, regex literals, JSX text, Python docstrings, and YAML block/quoted
 //! scalars are never comments, so the grammar does the hard work for us.
+use crate::rewrite::{line_end, line_start};
 use crate::types::{Comment, CommentBlock, CommentKind, Language};
 use anyhow::{Result, anyhow};
 use regex::Regex;
@@ -15,24 +16,6 @@ fn ts_language(lang: Language) -> tree_sitter::Language {
         Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
     }
-}
-
-/// Byte offset of the start of the line containing `pos`.
-fn line_start(src: &str, pos: usize) -> usize {
-    src.as_bytes()[..pos]
-        .iter()
-        .rposition(|&b| b == b'\n')
-        .map(|i| i + 1)
-        .unwrap_or(0)
-}
-
-/// Byte offset of the end of the line containing `pos` (the newline itself, or EOF).
-fn line_end(src: &str, pos: usize) -> usize {
-    src.as_bytes()[pos..]
-        .iter()
-        .position(|&b| b == b'\n')
-        .map(|i| pos + i)
-        .unwrap_or(src.len())
 }
 
 /// The whitespace run at the start of the line containing `pos`, up to the first non-whitespace

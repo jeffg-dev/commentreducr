@@ -15,7 +15,8 @@ fn eol_of(src: &str) -> &'static str {
 }
 
 /// Byte offset of the start of the line containing `pos`. `pos` need not be a char boundary.
-fn line_start(src: &str, pos: usize) -> usize {
+/// Shared with `parse` and `docstring`, which need the identical byte-scanning logic.
+pub(crate) fn line_start(src: &str, pos: usize) -> usize {
     src.as_bytes()[..pos]
         .iter()
         .rposition(|&b| b == b'\n')
@@ -23,10 +24,20 @@ fn line_start(src: &str, pos: usize) -> usize {
         .unwrap_or(0)
 }
 
+/// Byte offset of the end of the line containing `pos` (the newline itself, or EOF). `pos` need
+/// not be a char boundary. Shared with `parse` and `docstring`.
+pub(crate) fn line_end(src: &str, pos: usize) -> usize {
+    src.as_bytes()[pos..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|i| pos + i)
+        .unwrap_or(src.len())
+}
+
 /// Byte offset just past the terminator of the line containing `pos` (i.e. the start of the next
 /// line), or the end of the string if `pos`'s line has no terminator (EOF).
-/// `pos` need not be a char boundary.
-fn line_end_incl_terminator(src: &str, pos: usize) -> usize {
+/// `pos` need not be a char boundary. Shared with `docstring`.
+pub(crate) fn line_end_incl_terminator(src: &str, pos: usize) -> usize {
     match src.as_bytes()[pos..].iter().position(|&b| b == b'\n') {
         Some(i) => pos + i + 1,
         None => src.len(),

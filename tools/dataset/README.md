@@ -132,10 +132,10 @@ in bloat, the label keeps only that fact, terse, no story.
 | kind       | is_test | rows | kept | DELETE |
 |------------|:-------:|-----:|-----:|-------:|
 | module     | false   |    8 |    3 |      5 |
-| module     | true    |   10 |    6 |      4 |
+| module     | true    |   10 |    4 |      6 |
 | class      | false   |   10 |    4 |      6 |
 | function   | false   |   16 |    6 |     10 |
-| function   | true    |   14 |    8 |      6 |
+| function   | true    |   14 |    6 |      8 |
 
 ### How to run
 

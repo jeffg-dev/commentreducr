@@ -301,13 +301,17 @@ fn make_docstring(
     let start = string_node.start_byte();
     let end = string_node.end_byte();
     let ls = line_start(src, start);
-    let own_line = src[ls..start].chars().all(char::is_whitespace);
+    // A leading UTF-8 BOM is not whitespace by Unicode's White_Space property, but it is not
+    // code either: strip it before judging what (if anything) precedes the docstring on its
+    // line, so a BOM'd file-initial module docstring is still recognized as own_line.
+    let before = src[ls..start].trim_start_matches('\u{feff}');
+    let own_line = before.chars().all(char::is_whitespace);
     let le = line_end(src, end);
     // After a complete string statement a `#` can only start a comment, which goes with the
     // docstring (`"""  # noqa`), so it does not count as code.
     let rest = src[end..le].trim();
     let code_after = !rest.is_empty() && !rest.starts_with('#');
-    let indent = src[ls..start].to_string();
+    let indent = before.to_string();
 
     let mut raw_content = String::new();
     let mut cursor = string_node.walk();
@@ -737,6 +741,23 @@ def outer():
         );
         // Must still parse cleanly.
         assert!(extract_docstrings(&out, false).is_ok());
+    }
+
+    #[test]
+    fn bom_before_module_docstring_does_not_defeat_own_line() {
+        let src = "\u{feff}\"\"\"Module doc with BOM.\"\"\"\n\nimport os\n";
+        let docs = extract_docstrings(src, false).unwrap();
+        assert_eq!(docs.len(), 1);
+        assert!(
+            docs[0].own_line,
+            "a leading BOM must not read as code preceding the docstring"
+        );
+        assert!(!docs[0].only_statement, "import os follows it");
+        let edit = delete_edit(src, &docs[0]).unwrap();
+        let out = rewrite::apply(src, vec![edit]);
+        // The BOM itself survives byte-for-byte; only the docstring (and the blank line after
+        // it) is removed.
+        assert_eq!(out, "\u{feff}import os\n");
     }
 
     #[test]

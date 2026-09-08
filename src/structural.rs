@@ -76,14 +76,18 @@ static LICENSE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\b(license|copyright|SPDX)\b").unwrap());
 
 /// True if the block (or any comment in it) is structural and must be preserved in both modes.
-/// `src` is unused now that license/copyright/SPDX detection no longer depends on file position,
-/// but is kept in the signature per the module contract.
-pub fn is_structural(block: &CommentBlock, lang: Language, _src: &str) -> bool {
-    // Python/YAML shebang: the very first byte of the file.
+pub fn is_structural(block: &CommentBlock, lang: Language, src: &str) -> bool {
+    // Python/YAML shebang: the very first byte of the file, or right after a leading UTF-8 BOM
+    // (which some editors/tools prepend and which must itself survive untouched).
+    let content_start = if src.starts_with('\u{feff}') {
+        '\u{feff}'.len_utf8()
+    } else {
+        0
+    };
     if matches!(lang, Language::Python | Language::Yaml)
-        && block.start == 0
+        && block.start == content_start
         && let Some(first) = block.comments.first()
-        && first.start == 0
+        && first.start == content_start
         && first.text.starts_with("#!")
     {
         return true;
@@ -203,5 +207,18 @@ mod tests {
                 "text = {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn shebang_after_a_leading_bom_is_structural() {
+        let bom = "\u{feff}";
+        let text = "#!/usr/bin/env ansible-playbook";
+        let start = bom.len();
+        let block = block_for(text, start, 0);
+        let src = format!("{bom}{text}\nkey: value\n");
+        assert!(
+            is_structural(&block, Language::Yaml, &src),
+            "a shebang right after a BOM must still be structural"
+        );
     }
 }

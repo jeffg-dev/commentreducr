@@ -42,6 +42,14 @@ pub struct Docstring {
     pub signature: String,
     /// Decorator texts (e.g. "@click.command()"), trimmed.
     pub decorators: Vec<String>,
+    /// Base-class names for a Class docstring (identifiers and dotted attribute chains from the
+    /// `superclasses` argument list; a `Generic[T]` subscript contributes `Generic`). Empty for
+    /// Module/Function.
+    pub bases: Vec<String>,
+    /// Class docstring whose bases match `keep_bases` directly, or transitively through a
+    /// same-file base class that itself matches. Always false for Module/Function; computed by
+    /// `extract_docstrings` after the whole file is walked.
+    pub base_matches: bool,
     /// Function named test*/Test*, Class named Test*, or Module when in_test_file.
     pub is_test: bool,
     pub in_test_file: bool,
@@ -87,7 +95,13 @@ pub fn is_test_file(path: &Path) -> bool {
 
 /// Every docstring in `src`, in source order (module, then every class/function's docstring,
 /// nested ones included). `Err` when the tree has parse errors, like `parse::extract_comments`.
-pub fn extract_docstrings(src: &str, in_test_file: bool) -> Result<Vec<Docstring>> {
+/// `keep_bases` decides each Class docstring's `base_matches`: true when a base matches one of
+/// these patterns directly, or is itself a same-file class that already matches (transitively).
+pub fn extract_docstrings(
+    src: &str,
+    in_test_file: bool,
+    keep_bases: &[String],
+) -> Result<Vec<Docstring>> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&tree_sitter_python::LANGUAGE.into())?;
     let tree = parser
@@ -99,11 +113,52 @@ pub fn extract_docstrings(src: &str, in_test_file: bool) -> Result<Vec<Docstring
 
     let lines: Vec<&str> = src.lines().collect();
     let mut out = Vec::new();
-    walk(tree.root_node(), src, &lines, in_test_file, &mut out);
+    // Every class in the file, docstring or not: a link in an inheritance chain (e.g. `Other`
+    // below) still needs to carry its match status to whatever subclasses it.
+    let mut classes: Vec<(String, Vec<String>)> = Vec::new();
+    walk(
+        tree.root_node(),
+        src,
+        &lines,
+        in_test_file,
+        &mut out,
+        &mut classes,
+    );
+
+    let mut matched: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    loop {
+        let mut changed = false;
+        for (name, bases) in &classes {
+            if !matched.contains(name.as_str())
+                && bases
+                    .iter()
+                    .any(|b| name_matches(b, keep_bases) || matched.contains(b.as_str()))
+            {
+                matched.insert(name.as_str());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for doc in &mut out {
+        if doc.kind == DocKind::Class {
+            doc.base_matches = matched.contains(doc.name.as_str());
+        }
+    }
+
     Ok(out)
 }
 
-fn walk(node: Node, src: &str, lines: &[&str], in_test_file: bool, out: &mut Vec<Docstring>) {
+fn walk(
+    node: Node,
+    src: &str,
+    lines: &[&str],
+    in_test_file: bool,
+    out: &mut Vec<Docstring>,
+    classes: &mut Vec<(String, Vec<String>)>,
+) {
     match node.kind() {
         "module" => {
             if let Some(string_node) = first_stmt_string(node)
@@ -114,6 +169,7 @@ fn walk(node: Node, src: &str, lines: &[&str], in_test_file: bool, out: &mut Vec
                     DocKind::Module,
                     String::new(),
                     String::new(),
+                    Vec::new(),
                     Vec::new(),
                     src,
                     lines,
@@ -129,13 +185,21 @@ fn walk(node: Node, src: &str, lines: &[&str], in_test_file: bool, out: &mut Vec
             } else {
                 DocKind::Class
             };
+            let name = node
+                .child_by_field_name("name")
+                .map(|n| src[n.start_byte()..n.end_byte()].to_string())
+                .unwrap_or_default();
+            let bases = if kind == DocKind::Class {
+                class_bases(node, src)
+            } else {
+                Vec::new()
+            };
+            if kind == DocKind::Class {
+                classes.push((name.clone(), bases.clone()));
+            }
             if let Some(body) = node.child_by_field_name("body")
                 && let Some(string_node) = first_stmt_string(body)
             {
-                let name = node
-                    .child_by_field_name("name")
-                    .map(|n| src[n.start_byte()..n.end_byte()].to_string())
-                    .unwrap_or_default();
                 let decorators = decorators_of(node, src);
                 let signature = header_signature(node, src);
                 if let Some(doc) = make_docstring(
@@ -146,6 +210,7 @@ fn walk(node: Node, src: &str, lines: &[&str], in_test_file: bool, out: &mut Vec
                     name,
                     signature,
                     decorators,
+                    bases,
                     src,
                     lines,
                     in_test_file,
@@ -158,7 +223,7 @@ fn walk(node: Node, src: &str, lines: &[&str], in_test_file: bool, out: &mut Vec
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        walk(child, src, lines, in_test_file, out);
+        walk(child, src, lines, in_test_file, out, classes);
     }
 }
 
@@ -215,6 +280,54 @@ fn decorators_of(node: Node, src: &str) -> Vec<String> {
         .collect()
 }
 
+/// Base-class names from a `class_definition`'s `superclasses` field (an `argument_list`):
+/// identifiers and dotted attribute chains verbatim; a `Generic[T]` subscript contributes the
+/// text of its `value` (`Generic`) when that is itself an identifier/attribute. A
+/// `keyword_argument` (`metaclass=...`) or anything else is skipped.
+fn class_bases(node: Node, src: &str) -> Vec<String> {
+    let Some(superclasses) = node.child_by_field_name("superclasses") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut cursor = superclasses.walk();
+    for child in superclasses.named_children(&mut cursor) {
+        match child.kind() {
+            "identifier" | "attribute" => {
+                out.push(src[child.start_byte()..child.end_byte()].to_string())
+            }
+            "subscript" => {
+                if let Some(value) = child.child_by_field_name("value")
+                    && matches!(value.kind(), "identifier" | "attribute")
+                {
+                    out.push(src[value.start_byte()..value.end_byte()].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A decorator's dotted name: the leading `@` stripped, then the run of alphanumeric/`_`/`.`
+/// chars (stops at `(`, whitespace, or anything else that can't be part of a dotted name).
+fn decorator_name(decorator: &str) -> &str {
+    let s = decorator.strip_prefix('@').unwrap_or(decorator);
+    let end = s
+        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+        .unwrap_or(s.len());
+    &s[..end]
+}
+
+/// True when `name` equals one of `patterns`, or ends with `"." + pattern` for one of them (so a
+/// dotted pattern like `dspy.Signature` matches only that suffix, while a bare pattern like
+/// `tool` matches any dotted prefix ending in `.tool` as well as the bare name itself).
+/// Case-sensitive.
+pub fn name_matches(name: &str, patterns: &[String]) -> bool {
+    patterns
+        .iter()
+        .any(|p| name == p || name.ends_with(&format!(".{p}")))
+}
+
 /// The def/class header, collapsed to one line and trimmed, up to and including the `:` that is a
 /// direct child of the definition node (so a `:` nested in a type annotation or default value is
 /// never mistaken for it).
@@ -257,6 +370,7 @@ fn make_docstring(
     name: String,
     signature: String,
     decorators: Vec<String>,
+    bases: Vec<String>,
     src: &str,
     lines: &[&str],
     in_test_file: bool,
@@ -320,6 +434,8 @@ fn make_docstring(
         name,
         signature,
         decorators,
+        bases,
+        base_matches: false,
         is_test,
         in_test_file,
         only_statement,
@@ -427,9 +543,12 @@ fn cleandoc(raw: &str) -> String {
 }
 
 /// Always kept, in every mode: doctest prompts, a Module docstring in a file that reads
-/// `__doc__` (argparse/click render it as help text), license/copyright/SPDX text, or any
-/// decorator that looks like a click/typer command (its docstring becomes the command's help).
-pub fn is_structural(doc: &Docstring, src: &str) -> bool {
+/// `__doc__` (argparse/click render it as help text), license/copyright/SPDX text, a decorator
+/// matching `keep_decorators` (e.g. Strands `@tool`, click/typer commands -- its docstring
+/// becomes the decorated callable's prompt/help text), or a class whose bases match `keep_bases`
+/// (e.g. `dspy.Signature`, `pydantic.BaseModel`, including a same-file subclass of one), already
+/// recorded on `doc.base_matches` by `extract_docstrings`.
+pub fn is_structural(doc: &Docstring, src: &str, keep_decorators: &[String]) -> bool {
     if doc.text.contains(">>>") {
         return true;
     }
@@ -439,10 +558,14 @@ pub fn is_structural(doc: &Docstring, src: &str) -> bool {
     if LICENSE_RE.is_match(&doc.text) {
         return true;
     }
-    doc.decorators.iter().any(|d| {
-        let lower = d.to_lowercase();
-        lower.contains("command") || lower.contains("group")
-    })
+    if doc
+        .decorators
+        .iter()
+        .any(|d| name_matches(decorator_name(d), keep_decorators))
+    {
+        return true;
+    }
+    doc.base_matches
 }
 
 /// Edit that removes `doc`, or `None` when it is too risky to touch (code shares its first or
@@ -608,7 +731,7 @@ def outer():
     def inner():
         """Nested doc."""
 "#;
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         let names: Vec<&str> = docs.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(
             names,
@@ -684,7 +807,7 @@ def outer():
     #[test]
     fn test_prefixed_class_docstring_is_test() {
         let src = "class TestFoo:\n    \"\"\"Holds a couple of test methods.\"\"\"\n\n    def test_one(self):\n        pass\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         let foo = by_name(&docs, "TestFoo");
         assert_eq!(foo.kind, DocKind::Class);
         assert!(
@@ -696,7 +819,7 @@ def outer():
     #[test]
     fn cleandoc_dedents_and_trims_blank_lines() {
         let src = "def f():\n    \"\"\"First line.\n\n        Indented para.\n        More indented.\n\n    \"\"\"\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert_eq!(docs.len(), 1);
         assert_eq!(
             docs[0].text,
@@ -707,7 +830,7 @@ def outer():
     #[test]
     fn delete_edit_on_a_realistic_file() {
         let src = "\"\"\"Module doc.\"\"\"\n\nimport os\n\n\ndef f():\n    \"\"\"Function doc.\"\"\"\n    return 1\n\n\nclass C:\n    \"\"\"Only stmt.\"\"\"\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert_eq!(docs.len(), 3);
         let edits: Vec<Edit> = docs.iter().map(|d| delete_edit(src, d).unwrap()).collect();
         let out = rewrite::apply(src, edits);
@@ -716,13 +839,13 @@ def outer():
             "import os\n\n\ndef f():\n    return 1\n\n\nclass C:\n    pass\n"
         );
         // Must still parse cleanly.
-        assert!(extract_docstrings(&out, false).is_ok());
+        assert!(extract_docstrings(&out, false, &[]).is_ok());
     }
 
     #[test]
     fn bom_before_module_docstring_does_not_defeat_own_line() {
         let src = "\u{feff}\"\"\"Module doc with BOM.\"\"\"\n\nimport os\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert_eq!(docs.len(), 1);
         assert!(
             docs[0].own_line,
@@ -739,7 +862,7 @@ def outer():
     #[test]
     fn delete_edit_preserves_crlf() {
         let src = "\"\"\"Doc.\"\"\"\r\n\r\nimport os\r\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert_eq!(docs.len(), 1);
         let edit = delete_edit(src, &docs[0]).unwrap();
         let out = rewrite::apply(src, vec![edit]);
@@ -749,14 +872,14 @@ def outer():
     #[test]
     fn delete_edit_leaves_code_after_untouched() {
         let src = "def g(): \"\"\"x\"\"\"; y = 1\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert_eq!(docs.len(), 1);
         assert!(!docs[0].only_statement);
         assert!(delete_edit(src, &docs[0]).is_none());
 
         // A trailing comment on the closing line is not code: the docstring goes, comment and all.
         let src = "\"\"\"Doc.\n\"\"\"  # noqa\nimport os\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert!(!docs[0].code_after);
         let out = rewrite::apply(src, vec![delete_edit(src, &docs[0]).unwrap()]);
         assert_eq!(out, "import os\n");
@@ -765,7 +888,7 @@ def outer():
     #[test]
     fn replace_edit_one_line_at_four_space_indent() {
         let src = "def f():\n    \"\"\"old\"\"\"\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         let edit = replace_edit(src, &docs[0], "New one line").unwrap();
         let out = rewrite::apply(src, vec![edit]);
         assert_eq!(out, "def f():\n    \"\"\"New one line\"\"\"\n");
@@ -774,7 +897,7 @@ def outer():
     #[test]
     fn replace_edit_multi_line_at_eight_space_indent_preserves_quote() {
         let src = "class C:\n    def m(self):\n        '''old'''\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert_eq!(docs[0].indent, "        ");
         assert_eq!(docs[0].quote, "'''");
         let edit = replace_edit(src, &docs[0], "Line one\n\nLine two").unwrap();
@@ -788,7 +911,7 @@ def outer():
     #[test]
     fn replace_edit_refuses_unsafe_new_text() {
         let src = "def f():\n    \"\"\"old\"\"\"\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert!(replace_edit(src, &docs[0], "").is_none());
         assert!(replace_edit(src, &docs[0], "has \"\"\" inside").is_none());
         assert!(replace_edit(src, &docs[0], "has \\ inside").is_none());
@@ -800,11 +923,11 @@ def outer():
         // append right after it, forming a longer run than intended and closing the string
         // early -- leaving a dangling extra quote character the tokenizer never expects.
         let src = "def f():\n    \"\"\"old\"\"\"\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert!(replace_edit(src, &docs[0], "Ends with quote\"").is_none());
 
         let src = "def f():\n    '''old'''\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert!(replace_edit(src, &docs[0], "Uses the value 'raw'").is_none());
     }
 
@@ -814,7 +937,7 @@ def outer():
         // (`def probe(self): `) precedes the docstring on its own line; splicing a multi-line
         // reply in would duplicate that code into the docstring's text.
         let src = "class C:\n    def probe(self): \"\"\"old\"\"\"\n";
-        let docs = extract_docstrings(src, false).unwrap();
+        let docs = extract_docstrings(src, false, &[]).unwrap();
         assert!(!docs[0].own_line);
         assert!(replace_edit(src, &docs[0], "First line.\nSecond line.").is_none());
         // A single-line reply is unaffected: nothing needs the indent.
@@ -840,63 +963,229 @@ def outer():
 
     #[test]
     fn is_structural_table() {
-        let base = |kind, text: &str, decorators: Vec<&str>| Docstring {
-            start: 0,
-            end: 0,
-            start_line: 0,
-            end_line: 0,
-            indent: String::new(),
-            kind,
-            name: String::new(),
-            signature: String::new(),
-            decorators: decorators.into_iter().map(str::to_string).collect(),
-            is_test: false,
-            in_test_file: false,
-            only_statement: false,
-            own_line: true,
-            code_after: false,
-            prefix: String::new(),
-            quote: "\"\"\"".to_string(),
-            text: text.to_string(),
-            body_preview: Vec::new(),
-            body_lines: 0,
+        let keep_decorators: Vec<String> = ["tool", "command", "group"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let keep_bases: Vec<String> = ["Signature", "BaseModel"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let base = |kind, text: &str, decorators: Vec<&str>, bases: Vec<&str>| {
+            let base_matches = bases.iter().any(|b| name_matches(b, &keep_bases));
+            Docstring {
+                start: 0,
+                end: 0,
+                start_line: 0,
+                end_line: 0,
+                indent: String::new(),
+                kind,
+                name: String::new(),
+                signature: String::new(),
+                decorators: decorators.into_iter().map(str::to_string).collect(),
+                bases: bases.into_iter().map(str::to_string).collect(),
+                base_matches,
+                is_test: false,
+                in_test_file: false,
+                only_statement: false,
+                own_line: true,
+                code_after: false,
+                prefix: String::new(),
+                quote: "\"\"\"".to_string(),
+                text: text.to_string(),
+                body_preview: Vec::new(),
+                body_lines: 0,
+            }
         };
 
         assert!(is_structural(
-            &base(DocKind::Function, "usage:\n    >>> f()\n    1", vec![]),
-            ""
+            &base(
+                DocKind::Function,
+                "usage:\n    >>> f()\n    1",
+                vec![],
+                vec![]
+            ),
+            "",
+            &keep_decorators
         ));
         assert!(is_structural(
-            &base(DocKind::Module, "plain module doc", vec![]),
-            "print(__doc__)"
+            &base(DocKind::Module, "plain module doc", vec![], vec![]),
+            "print(__doc__)",
+            &keep_decorators
         ));
         assert!(
             !is_structural(
-                &base(DocKind::Class, "plain class doc", vec![]),
-                "print(__doc__)"
+                &base(DocKind::Class, "plain class doc", vec![], vec![]),
+                "print(__doc__)",
+                &keep_decorators
             ),
             "only a Module docstring is structural for __doc__"
         );
         assert!(is_structural(
-            &base(DocKind::Module, "License: MIT", vec![]),
-            ""
+            &base(DocKind::Module, "License: MIT", vec![], vec![]),
+            "",
+            &keep_decorators
+        ));
+
+        // keep_decorators: tool, command, group.
+        assert!(is_structural(
+            &base(DocKind::Function, "runs a tool", vec!["@tool"], vec![]),
+            "",
+            &keep_decorators
         ));
         assert!(is_structural(
-            &base(DocKind::Function, "run the thing", vec!["@app.command()"]),
-            ""
+            &base(
+                DocKind::Function,
+                "runs a tool",
+                vec!["@strands.tool(name=\"x\")"],
+                vec![]
+            ),
+            "",
+            &keep_decorators
         ));
         assert!(is_structural(
-            &base(DocKind::Function, "run the thing", vec!["@cli.group()"]),
-            ""
+            &base(
+                DocKind::Function,
+                "run the thing",
+                vec!["@app.command()"],
+                vec![]
+            ),
+            "",
+            &keep_decorators
+        ));
+        assert!(is_structural(
+            &base(
+                DocKind::Function,
+                "run the thing",
+                vec!["@cli.group()"],
+                vec![]
+            ),
+            "",
+            &keep_decorators
         ));
         assert!(!is_structural(
             &base(
                 DocKind::Function,
                 "just a normal docstring",
-                vec!["@property"]
+                vec!["@property"],
+                vec![]
             ),
-            ""
+            "",
+            &keep_decorators
         ));
+        assert!(!is_structural(
+            &base(
+                DocKind::Function,
+                "cached fn",
+                vec!["@functools.cache"],
+                vec![]
+            ),
+            "",
+            &keep_decorators
+        ));
+        assert!(
+            !is_structural(
+                &base(
+                    DocKind::Function,
+                    "registers a plugin",
+                    vec!["@tooling.register"],
+                    vec![]
+                ),
+                "",
+                &keep_decorators
+            ),
+            "last dotted segment is `register`, not a keep_decorators pattern"
+        );
+        assert!(!is_structural(
+            &base(
+                DocKind::Function,
+                "a pytest fixture",
+                vec!["@pytest.fixture"],
+                vec![]
+            ),
+            "",
+            &keep_decorators
+        ));
+
+        // keep_bases: Signature, BaseModel.
+        assert!(is_structural(
+            &base(
+                DocKind::Class,
+                "a dspy signature",
+                vec![],
+                vec!["dspy.Signature"]
+            ),
+            "",
+            &keep_decorators
+        ));
+        assert!(is_structural(
+            &base(
+                DocKind::Class,
+                "a pydantic model",
+                vec![],
+                vec!["BaseModel"]
+            ),
+            "",
+            &keep_decorators
+        ));
+        assert!(!is_structural(
+            &base(DocKind::Class, "a plain class", vec![], vec!["object"]),
+            "",
+            &keep_decorators
+        ));
+    }
+
+    #[test]
+    fn name_matches_table() {
+        let patterns: Vec<String> = ["tool", "dspy.Signature"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let cases: &[(&str, bool)] = &[
+            ("tool", true),
+            ("strands.tool", true),
+            ("mcp.tool", true),
+            ("agent.tool", true),
+            ("dspy.Signature", true),
+            ("Signature", false),
+            ("other.dspy.Signature", true),
+            ("Tool", false),
+            ("tooling", false),
+            ("register", false),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(name_matches(name, &patterns), *expected, "name = {name:?}");
+        }
+    }
+
+    #[test]
+    fn same_file_subclass_inherits_base_match() {
+        let src = r#"
+class Base(dspy.Signature):
+    """i"""
+
+class Child(Base):
+    """j"""
+
+class Other(Child, Mixin):
+    pass
+
+class Leaf(Other):
+    """k"""
+
+class Plain(Foo):
+    """p"""
+"#;
+        let keep_bases: Vec<String> = ["Signature", "BaseModel"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let docs = extract_docstrings(src, false, &keep_bases).unwrap();
+        assert!(by_name(&docs, "Base").base_matches);
+        assert!(by_name(&docs, "Child").base_matches);
+        assert!(by_name(&docs, "Leaf").base_matches);
+        assert!(!by_name(&docs, "Plain").base_matches);
     }
 }
 
@@ -927,7 +1216,7 @@ def test_rejection_is_recorded_at_info():
 
     #[test]
     fn extracts_from_a_real_test_module() {
-        let docs = extract_docstrings(BAD_EXAMPLE, true).unwrap();
+        let docs = extract_docstrings(BAD_EXAMPLE, true, &[]).unwrap();
         let names: Vec<&str> = docs.iter().map(|d| d.name.as_str()).collect();
         assert_eq!(
             names,

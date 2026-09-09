@@ -56,6 +56,9 @@ mod tests {
             llm_concurrency: 1,
             dry_run: false,
             verbose: false,
+            ignore: vec![],
+            keep_decorators: vec![],
+            keep_bases: vec![],
         }
     }
 

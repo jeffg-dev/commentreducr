@@ -816,3 +816,200 @@ fn reduce_mode_end_to_end_with_a_mock_llm() {
         "sample.ts's big block not deleted:\n{sample_ts}"
     );
 }
+
+/// `ignore` skips files even though `git ls-files` tracks them: the shipped default
+/// (`migrations/`) applies with no config at all, and a config's `ignore` list adds to that
+/// default instead of replacing it.
+#[test]
+fn ignore_skips_default_migrations_and_user_configured_patterns() {
+    let dir = TempDir::new();
+    let comment = "# a deletable comment describing nothing structural, just filler prose\n";
+    let src = format!("{comment}def f():\n    pass\n");
+    std::fs::write(dir.path().join("keep.py"), &src).unwrap();
+    std::fs::create_dir_all(dir.path().join("migrations")).unwrap();
+    std::fs::write(dir.path().join("migrations/foo.py"), &src).unwrap();
+    commit_all(dir.path());
+
+    // No user config: the shipped default `ignore = ["migrations/"]` alone skips
+    // migrations/foo.py, so only keep.py is scanned and changed.
+    run(commentreducr()
+        .arg("comments")
+        .arg(dir.path())
+        .arg("--delete")
+        .arg("--config")
+        .arg(dir.path().join("no-such-config.toml")))
+    .success()
+    .stderr_contains("1 files scanned, 1 changed, 0 skipped");
+    assert_eq!(
+        read(dir.path(), "migrations/foo.py"),
+        src,
+        "migrations/ file should not have been scanned"
+    );
+    assert!(
+        !read(dir.path(), "keep.py").contains("a deletable comment"),
+        "keep.py should have been processed"
+    );
+
+    // Add a legacy/ file and reset keep.py, then rerun with a config `ignore = ["legacy/"]`:
+    // it should add to, not replace, the shipped default, so both migrations/ and legacy/ stay
+    // untouched while keep.py is processed again.
+    std::fs::write(dir.path().join("keep.py"), &src).unwrap();
+    std::fs::create_dir_all(dir.path().join("legacy")).unwrap();
+    std::fs::write(dir.path().join("legacy/bar.py"), &src).unwrap();
+    git(dir.path(), &["add", "-A"]);
+    git(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "legacy",
+        ],
+    );
+
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, "ignore = [\"legacy/\"]\n").unwrap();
+    run(commentreducr()
+        .arg("comments")
+        .arg(dir.path())
+        .arg("--delete")
+        .arg("--config")
+        .arg(&config_path))
+    .success()
+    .stderr_contains("1 files scanned, 1 changed, 0 skipped");
+
+    assert_eq!(
+        read(dir.path(), "migrations/foo.py"),
+        src,
+        "migrations/ file should still not have been scanned"
+    );
+    assert_eq!(
+        read(dir.path(), "legacy/bar.py"),
+        src,
+        "legacy/ file should not have been scanned"
+    );
+    assert!(
+        !read(dir.path(), "keep.py").contains("a deletable comment"),
+        "keep.py should have been processed again"
+    );
+}
+
+/// A `@tool`-decorated function (Strands), a `dspy.Signature` subclass, and a `BaseModel`
+/// subclass all have their docstrings sent to an LLM at runtime -- `--delete` must leave them
+/// byte-for-byte untouched, unlike a plain function's docstring in the same file.
+#[test]
+fn docstrings_delete_keeps_agentic_docstrings() {
+    let dir = TempDir::new();
+    let src = r#"from strands import tool
+
+
+@tool
+def do_thing(x: int) -> int:
+    """Adds one to x.
+
+    This text is sent to the model as the tool description.
+    """
+    return x + 1
+
+
+class Q(dspy.Signature):
+    """Answers a question, given some context."""
+
+    question: str = dspy.InputField()
+
+
+class M(BaseModel):
+    """A structured-output schema sent to the model."""
+
+    name: str
+
+
+def helper(x):
+    """This docstring says nothing the code doesn't already say."""
+    return x * 2
+"#;
+    std::fs::write(dir.path().join("tools.py"), src).unwrap();
+    commit_all(dir.path());
+
+    run(commentreducr()
+        .arg("docstrings")
+        .arg(dir.path())
+        .arg("--delete")
+        .arg("--config")
+        .arg(dir.path().join("no-such-config.toml")))
+    .success();
+
+    let after = read(dir.path(), "tools.py");
+    assert!(
+        after.contains(
+            "Adds one to x.\n\n    This text is sent to the model as the tool description."
+        ),
+        "strands @tool docstring lost:\n{after}"
+    );
+    assert!(
+        after.contains("Answers a question, given some context."),
+        "dspy.Signature class docstring lost:\n{after}"
+    );
+    assert!(
+        after.contains("A structured-output schema sent to the model."),
+        "pydantic BaseModel class docstring lost:\n{after}"
+    );
+    assert!(
+        !after.contains("This docstring says nothing the code doesn't already say."),
+        "plain function docstring should have been deleted:\n{after}"
+    );
+}
+
+/// A config's `keep_decorators` list adds to the shipped default rather than replacing it: a
+/// `@pytest.fixture` docstring (not covered by the default `tool`/`command`/`group` list) is
+/// deleted with no config, and kept once the config adds `fixture`.
+#[test]
+fn docstrings_delete_keep_decorators_config_extends_default() {
+    let src = r#"import pytest
+
+
+@pytest.fixture
+def sample_data():
+    """Provides the sample data every test in this module reuses."""
+    return {"a": 1}
+"#;
+
+    let dir = TempDir::new();
+    std::fs::write(dir.path().join("fixtures.py"), src).unwrap();
+    commit_all(dir.path());
+    run(commentreducr()
+        .arg("docstrings")
+        .arg(dir.path())
+        .arg("--delete")
+        .arg("--config")
+        .arg(dir.path().join("no-such-config.toml")))
+    .success();
+    assert!(
+        !read(dir.path(), "fixtures.py").contains("Provides the sample data"),
+        "fixture docstring should be deleted without a keep_decorators config"
+    );
+
+    let dir = TempDir::new();
+    std::fs::write(dir.path().join("fixtures.py"), src).unwrap();
+    commit_all(dir.path());
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, "keep_decorators = [\"fixture\"]\n").unwrap();
+    run(commentreducr()
+        .arg("docstrings")
+        .arg(dir.path())
+        .arg("--delete")
+        .arg("--config")
+        .arg(&config_path))
+    .success();
+    assert!(
+        read(dir.path(), "fixtures.py")
+            .contains("Provides the sample data every test in this module reuses."),
+        "fixture docstring should survive with keep_decorators = [\"fixture\"] in the config"
+    );
+}

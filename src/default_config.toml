@@ -1,0 +1,14 @@
+# Every default commentreducr ships with. Copy this into ~/.config/commentreducr/config.toml
+# (or --config FILE) and override only what you need; flags win over that file, which wins over
+# these defaults. List-valued keys like `ignore` are the exception: a config file's list is
+# appended to the shipped default, not swapped in for it.
+endpoint = "http://localhost:8000/v1"        # OpenAI-compatible base URL
+model = "gemma-4-e2b-it-4bit"                # used for comments (and docstrings if docstrings_model is unset)
+docstrings_model = "gemma-4-26b-a4b-it-4bit" # used for docstrings
+workers = 8                                   # worker threads / max in-flight LLM requests
+min_lines = 4                                 # minimum lines in a block before it's reduced
+min_density = 5.0                             # comments only: minimum average words per line
+max_words = 20                                # comments only: target max words in a summary
+ignore = ["migrations/"]   # gitignore-syntax patterns; a user config's list is appended to this one
+keep_decorators = ["tool", "command", "group"]   # docstrings under these decorators are never touched (Strands @tool, click/typer commands)
+keep_bases = ["Signature", "BaseModel"]          # class docstrings with these bases are never touched (dspy.Signature, pydantic.BaseModel)

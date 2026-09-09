@@ -143,11 +143,13 @@ commentreducr docstrings .                    # same for Python docstrings; --de
 ```
 
 Both subcommands only process files `git ls-files` reports as tracked, so untracked scratch
-files and anything `.gitignore`d are left alone. `--delete` removes every non-structural
-comment/docstring outright, no LLM. `--reduce` (the default) is pickier: short, sparse or
-code-like blocks are left alone, and dense blocks go to a local LLM that replies `DELETE` or a
-terse replacement line. `-h` shows common flags; `--help` shows everything, including tuning
-flags.
+files and anything `.gitignore`d are left alone -- and a tracked file that now matches a
+gitignore rule (force-added with `git add -f`, or ignored after it was tracked) is skipped too.
+The `ignore` config key adds more gitignore-syntax patterns on top of that, see below. `--delete`
+removes every non-structural comment/docstring outright, no LLM. `--reduce` (the default) is
+pickier: short, sparse or code-like blocks are left alone, and dense blocks go to a local LLM
+that replies `DELETE` or a terse replacement line. `-h` shows common flags; `--help` shows
+everything, including tuning flags.
 
 ## What is kept
 
@@ -157,9 +159,13 @@ headers, shebangs, editor modelines, JSDoc blocks, and language-specific pragmas
 is in [DESIGN.md](DESIGN.md).
 
 For docstrings, `--delete` and `--reduce` both always keep: doctests, a module docstring in a
-file that reads `__doc__` (argparse/click render it as help text), any click/typer command's
-docstring, and license text. `--reduce` additionally leaves a docstring alone if it has fewer
-than `--min-lines` text lines, no LLM call needed.
+file that reads `__doc__` (argparse/click render it as help text), license text, a docstring
+under a decorator matching `keep_decorators` (default `tool`, `command`, `group`: Strands
+`@tool`, click/typer commands), and a class docstring whose bases match `keep_bases` (default
+`Signature`, `BaseModel`: DSPy signatures and pydantic models, whose docstrings are prompt text
+sent to the model at runtime), including a same-file subclass of one. A config's `keep_decorators`
+and `keep_bases` lists extend the defaults, same as `ignore`. `--reduce` additionally leaves a
+docstring alone if it has fewer than `--min-lines` text lines, no LLM call needed.
 
 ## What gets cut
 
@@ -213,18 +219,33 @@ docstring prompt 92.6% on a 68-row set (Gemma 4 26B A4B). For the comment model 
 Because the prefix is cached, each request only has to prefill roughly 50-150 tokens plus the
 comment itself.
 
-Config file at `~/.config/commentreducr/config.toml` (or `--config FILE`); flags override.
+Config file at `~/.config/commentreducr/config.toml` (or `--config FILE`); flags override the
+config file, which overrides the shipped defaults below (embedded from
+[`src/default_config.toml`](src/default_config.toml) and parsed at startup). List-valued keys
+like `ignore` are the exception to "overrides": a config file's list is appended to the shipped
+default rather than replacing it, so adding a pattern here still keeps `migrations/` ignored.
 
 ```toml
-endpoint = "http://localhost:8000/v1"        # default
-model = "gemma-4-e2b-it-4bit"                # default for comments (and docstrings if docstrings_model is unset)
-docstrings_model = "gemma-4-26b-a4b-it-4bit" # default for docstrings
-api_key = "sk-..."                            # optional
-workers = 8                                   # worker threads / max in-flight LLM requests, default 8
-min_lines = 4                                 # minimum lines in a block before it's reduced, default 4
-min_density = 5.0                             # comments only: minimum average words per line, default 5
-max_words = 20                                # comments only: target max words in a summary, default 20
+# Every default commentreducr ships with. Copy this into ~/.config/commentreducr/config.toml
+# (or --config FILE) and override only what you need; flags win over that file, which wins over
+# these defaults. List-valued keys like `ignore` are the exception: a config file's list is
+# appended to the shipped default, not swapped in for it.
+endpoint = "http://localhost:8000/v1"        # OpenAI-compatible base URL
+model = "gemma-4-e2b-it-4bit"                # used for comments (and docstrings if docstrings_model is unset)
+docstrings_model = "gemma-4-26b-a4b-it-4bit" # used for docstrings
+workers = 8                                   # worker threads / max in-flight LLM requests
+min_lines = 4                                 # minimum lines in a block before it's reduced
+min_density = 5.0                             # comments only: minimum average words per line
+max_words = 20                                # comments only: target max words in a summary
+ignore = ["migrations/"]   # gitignore-syntax patterns; a user config's list is appended to this one
+keep_decorators = ["tool", "command", "group"]   # docstrings under these decorators are never touched (Strands @tool, click/typer commands)
+keep_bases = ["Signature", "BaseModel"]          # class docstrings with these bases are never touched (dspy.Signature, pydantic.BaseModel)
 ```
+
+Add `api_key = "sk-..."` too if your endpoint needs one; it has no default so it isn't in the
+file above. `ignore` patterns are gitignore syntax, matched with `git check-ignore` against the
+same tracked file list `git ls-files` produced (see "Quick start" above); a pattern like
+`legacy/` in your own config skips that directory on top of the shipped `migrations/`.
 
 `--delete --dry-run` counts without writing so you can preview a `--delete` run; `--dry-run`
 only applies to `--delete`. `--reduce` scans first, then shows progress on stderr (percent,

@@ -114,7 +114,7 @@ impl FileResult {
 /// scan (parse + decide, no LLM) to count the blocks that will need an LLM call, so the second
 /// pass can show percentage progress and an estimate of the time left.
 pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
-    let mut tracked = files::tracked_source_files(root)?;
+    let mut tracked = files::tracked_source_files(root, &cfg.ignore)?;
     if cfg.target == Target::Docstrings {
         tracked.retain(|(_, lang)| *lang == Language::Python);
     }
@@ -177,9 +177,9 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
 /// print a redacted report (see `parse::diagnose`) of each one with parse errors to stdout,
 /// numbered; the path each number stands for goes to stderr so the stdout report can be pasted
 /// into a bug report as is. No LLM, no writes. Returns the number of files with parse errors.
-pub fn diagnose(root: &Path, target: Target) -> Result<usize> {
+pub fn diagnose(root: &Path, target: Target, ignore: &[String]) -> Result<usize> {
     let mut bad = 0;
-    let mut tracked = files::tracked_source_files(root)?;
+    let mut tracked = files::tracked_source_files(root, ignore)?;
     if target == Target::Docstrings {
         tracked.retain(|(_, lang)| *lang == Language::Python);
     }
@@ -390,7 +390,7 @@ enum DocAction {
 /// `cfg.min_lines` non-blank text lines, else Keep (the LLM call itself happens in
 /// `process_docstrings`, not here).
 fn decide_docstring(doc: &Docstring, src: &str, cfg: &Config) -> DocAction {
-    if docstring::is_structural(doc, src) {
+    if docstring::is_structural(doc, src, &cfg.keep_decorators) {
         return DocAction::Keep;
     }
     match cfg.mode {
@@ -417,7 +417,8 @@ fn plan_docstrings(
 ) -> Result<(String, Vec<(Docstring, DocAction)>), String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("unreadable: {e}"))?;
     let in_test_file = docstring::is_test_file(path);
-    let docs = docstring::extract_docstrings(&src, in_test_file).map_err(|e| format!("{e:#}"))?;
+    let docs = docstring::extract_docstrings(&src, in_test_file, &cfg.keep_bases)
+        .map_err(|e| format!("{e:#}"))?;
     let plan = docs
         .into_iter()
         .map(|doc| {

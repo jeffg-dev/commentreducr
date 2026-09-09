@@ -121,4 +121,16 @@ pub struct Config {
     pub llm_concurrency: usize,
     pub dry_run: bool,
     pub verbose: bool,
+    /// gitignore-syntax patterns for files to skip, on top of `git ls-files`'s own tracked set
+    /// and the repo's gitignore rules (see `files::tracked_source_files`). Shipped default plus
+    /// whatever the user's config file appends.
+    pub ignore: Vec<String>,
+    /// Decorator names (see `docstring::name_matches`) whose docstrings are never touched
+    /// (Strands `@tool`, click/typer commands). Shipped default plus whatever the user's config
+    /// file appends.
+    pub keep_decorators: Vec<String>,
+    /// Base-class names (see `docstring::name_matches`) whose class docstrings, and same-file
+    /// subclasses' docstrings, are never touched (dspy.Signature, pydantic.BaseModel). Shipped
+    /// default plus whatever the user's config file appends.
+    pub keep_bases: Vec<String>,
 }

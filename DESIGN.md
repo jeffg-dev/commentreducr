@@ -12,6 +12,16 @@ comments (Python, JS/TS, YAML) and Python docstrings (module, class, function).
 `commentreducr docstrings <path> --delete|--reduce [...]` are the two subcommands; both wrap the
 same set of flags (`Config` carries a `target: Target` field set from which one was invoked).
 
+## File selection
+
+`files::tracked_source_files` runs `git ls-files -z` under the target path, then makes one more
+git call -- `check-ignore --no-index -z --stdin`, with `core.excludesFile` pointed at a temp file
+of the configured `ignore` patterns -- to drop any tracked file the repo's own gitignore rules
+would now match (e.g. `git add -f`'d, or ignored after it was tracked) plus anything matching
+`ignore`. Config layering, `ignore` included: defaults (`src/default_config.toml`, embedded and
+parsed with the same `parse_config` at startup) -> user config file -> flags; list-valued keys
+like `ignore` concatenate default then user instead of one overriding the other.
+
 ## Pipeline (per file)
 
 Comments: files::tracked_source_files -> parse::extract_comments -> parse::group_blocks
@@ -61,8 +71,15 @@ is a formatted or byte string, never a docstring.
 
 Structural (always kept, in both modes): the text contains a doctest prompt (`>>>`); a module
 docstring in a file that reads `__doc__` anywhere (argparse/click render it as help text);
-license/copyright/SPDX text; or the def/class carries a click/typer command/group decorator
-(its docstring becomes the command's help).
+license/copyright/SPDX text; the def/class carries a decorator matching `keep_decorators`
+(default `tool`, `command`, `group`: Strands `@tool`, click/typer commands -- its docstring
+becomes the decorated callable's prompt/help text); or the class's bases match `keep_bases`
+(default `Signature`, `BaseModel`: a `dspy.Signature` subclass's docstring is the signature's
+instructions, a `pydantic.BaseModel` subclass's is the structured-output schema description),
+including a same-file subclass of one. A pattern `P` matches a dotted name `N` when `N == P` or
+`N` ends with `"." + P` (case-sensitive), so `tool` matches `@strands.tool(...)` and
+`Signature` matches `dspy.Signature`. A user config's `keep_decorators`/`keep_bases` lists
+extend these defaults, same as `ignore`.
 
 `--delete`: `docstring::delete_edit` removes the whole lines the docstring occupies plus any
 immediately-following blank lines, so the body never starts blank. A docstring that is the

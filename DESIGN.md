@@ -4,7 +4,7 @@ Quick-and-dirty developer tool. Clean, accurate code; minimal tests; no elaborat
 handling. The one property that matters: **never corrupt the target codebase.** Everything that
 is not a comment (strings, template literals, regex literals, JSX text, docstrings) must be
 byte-for-byte untouched, and structural comments must be preserved. The tool has two targets:
-comments (Python, JS/TS, YAML) and Python docstrings (module, class, function).
+comments (Python, JS/TS, YAML, Rust) and Python docstrings (module, class, function).
 
 ## CLI
 
@@ -18,9 +18,12 @@ same set of flags (`Config` carries a `target: Target` field set from which one 
 git call -- `check-ignore --no-index -z --stdin`, with `core.excludesFile` pointed at a temp file
 of the configured `ignore` patterns -- to drop any tracked file the repo's own gitignore rules
 would now match (e.g. `git add -f`'d, or ignored after it was tracked) plus anything matching
-`ignore`. Config layering, `ignore` included: defaults (`src/default_config.toml`, embedded and
-parsed with the same `parse_config` at startup) -> user config file -> flags; list-valued keys
-like `ignore` concatenate default then user instead of one overriding the other.
+`ignore`. A `.rs` file with a tracked sibling `.stderr` is dropped too: it is a Rust UI test
+(trybuild, ui_test, compiletest) whose expected compiler output pins line numbers, which deleting
+any comment line would shift. Config layering, `ignore` included: defaults
+(`src/default_config.toml`, embedded and parsed with the same `parse_config` at startup) -> user
+config file -> flags; list-valued keys like `ignore` concatenate default then user instead of one
+overriding the other.
 
 ## Pipeline (per file)
 
@@ -43,6 +46,11 @@ Docstrings: files::tracked_source_files (Python only) -> docstring::extract_docs
 - YAML comments follow the same two modes; commented-out YAML (a `#`-prefixed line that is
   itself valid-looking YAML) is code-like and kept like commented-out code in the other
   languages. tree-sitter-yaml is the parser; a comment is any `comment` node in its grammar.
+- Rust comments follow the same two modes. tree-sitter-rust is the parser; a comment is a
+  `line_comment` or `block_comment` node (block comments nest). Its doc comments carry a
+  doc-comment-marker child, which sets `Comment::doc`; a doc comment never groups with a plain
+  one. A line comment's range stops before its terminator: the Rust grammar includes a doc
+  comment's `\n`, and it and the Python grammar include a CRLF line's `\r`.
 
 ## Structural comments (always kept)
 
@@ -58,6 +66,12 @@ YAML: shebang, `yaml-language-server:`, `yamllint`, `prettier-ignore`, `noqa`, `
 `bridgecrew:skip`, `kics-scan`, `tflint-ignore`, `trivy:ignore`, `renovate:`, `ansible-lint`,
 `kube-linter`, `nosemgrep`, `ruleid:`, `pragma`, `@formatter:`, `region/endregion`, `language=`
 (IntelliJ injection), `TODO/FIXME/XXX/HACK/NOTE`.
+Rust: doc comments (`///` but not `////`, `//!`, `/** */` but not `/***` or `/**/`, `/*! */`:
+they are `#[doc]` attributes, doctests run from them, and `missing_docs` can make removing one a
+build error), `SAFETY:` anywhere in any case (clippy's `undocumented_unsafe_blocks`),
+`@generated`, mdBook `ANCHOR:`/`ANCHOR_END:`, `grcov-excl-*`/`LCOV_EXCL_*`, and at the start of
+the comment `region`/`endregion`, `noinspection`, `@formatter:`, `language=`, `nosemgrep`,
+`TODO/FIXME/XXX/HACK/NOTE`. A shebang is its own node in the Rust grammar, never a comment.
 All: license/copyright/SPDX text anywhere in the block; any block that starts at line 0 or 1
 of the file and mentions license/copyright; editor modelines anywhere in the comment
 (`vim:`/`vi:`/`ex:` followed by `set`/`settings`, or an Emacs `-*- ... -*-` line).

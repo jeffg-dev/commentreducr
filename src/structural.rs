@@ -1,5 +1,5 @@
 //! Detection of comments that must never be touched: tool directives, shebangs, encoding cookies,
-//! license headers, JSDoc, source maps, region markers, TODO/FIXME, etc.
+//! license headers, JSDoc, Rust doc comments, source maps, region markers, TODO/FIXME, etc.
 use crate::types::{CommentBlock, CommentKind, Language};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -9,6 +9,7 @@ enum Scope {
     Python,
     Js,
     Yaml,
+    Rust,
     All,
 }
 
@@ -22,6 +23,7 @@ impl Scope {
                 Language::JavaScript | Language::TypeScript | Language::Tsx
             ),
             Scope::Yaml => lang == Language::Yaml,
+            Scope::Rust => lang == Language::Rust,
         }
     }
 }
@@ -55,6 +57,19 @@ static RULES: LazyLock<Vec<(Scope, Regex)>> = LazyLock::new(|| {
         (
             Scope::Yaml,
             r"(?i)^#\s*(yaml-language-server:|yamllint\b|prettier-ignore\b|noqa\b|checkov:skip\b|bridgecrew:skip\b|kics-scan\b|tflint-ignore\b|trivy:ignore\b|renovate:|ansible-lint\b|kube-linter\b|nosemgrep\b|ruleid:|pragma\b|@formatter:|region\b|endregion\b|language\s*=)",
+        ),
+        // Rust: `SAFETY:` anywhere (clippy's undocumented_unsafe_blocks matches it
+        // case-insensitively), @generated (rustfmt's format_generated_files), mdBook
+        // ANCHOR/ANCHOR_END include markers, grcov/lcov coverage exclusions.
+        (
+            Scope::Rust,
+            r"(?i)(SAFETY:|@generated\b|\bANCHOR(_END)?:|grcov-excl-|LCOV_EXCL_)",
+        ),
+        // Rust: directives anchored at the start of the comment (after `//` and optional spaces):
+        // region folding, IntelliJ suppression/formatter/language injection, semgrep.
+        (
+            Scope::Rust,
+            r"(?i)^//\s*(region\b|endregion\b|noinspection\b|@formatter:|language\s*=|nosemgrep\b)",
         ),
         // All: editor modelines, anywhere in the comment (vim/vi/ex `set`, or an Emacs `-*- ... -*-`
         // local-variables line).
@@ -113,6 +128,12 @@ pub fn is_structural(block: &CommentBlock, lang: Language, src: &str) -> bool {
         return true;
     }
 
+    // Rust doc comments are `#[doc]` attributes: rustdoc renders them, their code blocks run as
+    // doctests, and removing one can fail a `#![deny(missing_docs)]` build.
+    if block.comments.iter().any(|c| c.doc) {
+        return true;
+    }
+
     // License/copyright/SPDX text anywhere in the block is always structural (per DESIGN.md),
     // regardless of where in the file it appears.
     if block.comments.iter().any(|c| LICENSE_RE.is_match(&c.text)) {
@@ -144,6 +165,7 @@ mod tests {
             end_line: start_line,
             own_line: true,
             code_after: false,
+            doc: false,
         };
         CommentBlock {
             comments: vec![comment],
@@ -207,6 +229,50 @@ mod tests {
                 "text = {text:?}"
             );
         }
+    }
+
+    #[test]
+    fn rust_doc_comments_and_safety_comments_are_structural() {
+        let src = r#"/// doc
+//// four slashes
+
+//! inner doc
+
+/** block doc */
+/*** banner ***/
+
+// SAFETY: the pointer is valid
+
+// Safety: lowercase counts too
+
+// region: helpers
+
+// plain remark
+fn f() {}
+"#;
+        let comments = crate::parse::extract_comments(src, Language::Rust).unwrap();
+        let got: Vec<(String, bool)> = crate::parse::group_blocks(src, comments)
+            .iter()
+            .map(|b| {
+                (
+                    b.comments[0].text.clone(),
+                    is_structural(b, Language::Rust, src),
+                )
+            })
+            .collect();
+        let want = [
+            ("/// doc", true),
+            ("//// four slashes", false),
+            ("//! inner doc", true),
+            ("/** block doc */", true),
+            ("/*** banner ***/", false),
+            ("// SAFETY: the pointer is valid", true),
+            ("// Safety: lowercase counts too", true),
+            ("// region: helpers", true),
+            ("// plain remark", false),
+        ];
+        let want: Vec<(String, bool)> = want.iter().map(|(t, k)| (t.to_string(), *k)).collect();
+        assert_eq!(got, want);
     }
 
     #[test]

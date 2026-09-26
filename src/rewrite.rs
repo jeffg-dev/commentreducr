@@ -200,6 +200,7 @@ mod tests {
                 end_line,
                 own_line,
                 code_after,
+                doc: false,
             }],
             start,
             end,

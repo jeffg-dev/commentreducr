@@ -193,6 +193,7 @@ mod tests {
                 end_line: 0,
                 own_line: true,
                 code_after: false,
+                doc: false,
             })
             .collect();
         CommentBlock {

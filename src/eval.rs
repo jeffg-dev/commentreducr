@@ -25,6 +25,7 @@ fn language(name: &str) -> Result<Language> {
         "typescript" => Language::TypeScript,
         "tsx" => Language::Tsx,
         "yaml" => Language::Yaml,
+        "rust" => Language::Rust,
         other => return Err(anyhow!("unknown language {other}")),
     })
 }

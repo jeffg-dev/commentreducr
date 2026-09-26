@@ -14,7 +14,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Two kinds of tracked file are then dropped, via one extra `git check-ignore` call (see
 /// `check_ignore`): files the repo's own gitignore rules would now exclude (e.g. `git add -f`'d,
 /// or ignored after being tracked), and files matching `ignore` (gitignore-syntax patterns,
-/// already merged with the shipped default by the caller).
+/// already merged with the shipped default by the caller). So is a `.rs` file with a tracked
+/// sibling `.stderr`: a Rust UI test (trybuild, ui_test, compiletest) whose expected compiler
+/// output pins line numbers, so deleting any comment line in it fails the test.
 pub fn tracked_source_files(root: &Path, ignore: &[String]) -> Result<Vec<(PathBuf, Language)>> {
     let (dir, pathspec) = if root.is_file() {
         let parent = root.parent().filter(|p| !p.as_os_str().is_empty());
@@ -47,10 +49,19 @@ pub fn tracked_source_files(root: &Path, ignore: &[String]) -> Result<Vec<(PathB
     let rels: Vec<&str> = stdout.split('\0').filter(|s| !s.is_empty()).collect();
 
     let ignored = check_ignore(dir, &rels, ignore)?;
+    let stderr: HashSet<&str> = rels
+        .iter()
+        .copied()
+        .filter(|r| r.ends_with(".stderr"))
+        .collect();
+    let is_ui_test = |rel: &str| {
+        rel.strip_suffix(".rs")
+            .is_some_and(|stem| stderr.contains(format!("{stem}.stderr").as_str()))
+    };
 
     let mut files = Vec::new();
     for rel in rels {
-        if ignored.contains(rel) {
+        if ignored.contains(rel) || is_ui_test(rel) {
             continue;
         }
         let path = Path::new(rel);
@@ -175,12 +186,20 @@ mod tests {
     fn runs_on_repo_and_filters_by_extension() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let files = tracked_source_files(root, &[]).unwrap();
-        // This is a Rust project; .rs files are not a supported language, so none
-        // of the returned paths should end in .rs, but every path should be absolute.
+        // This repo's own .rs files come back as Rust; Cargo.toml and the Markdown docs have no
+        // supported extension. Every path should be absolute.
         for (p, _) in &files {
             assert!(p.is_absolute());
-            assert_ne!(p.extension().unwrap(), "rs");
+            assert!(!matches!(
+                p.extension().unwrap().to_str(),
+                Some("toml" | "md")
+            ));
         }
+        assert!(
+            files
+                .iter()
+                .any(|(p, lang)| p.ends_with("src/lib.rs") && *lang == Language::Rust)
+        );
     }
 
     /// Minimal throwaway git repo for the ignore test below.
@@ -219,6 +238,23 @@ mod tests {
                 .unwrap();
             assert!(status.success(), "git {args:?} failed");
         }
+
+        /// `tracked_source_files` over the whole repo, as sorted repo-relative paths.
+        fn source_files(&self, ignore: &[String]) -> Vec<String> {
+            let root = self.dir.canonicalize().unwrap();
+            let mut names: Vec<String> = tracked_source_files(&root, ignore)
+                .unwrap()
+                .iter()
+                .map(|(p, _)| {
+                    p.strip_prefix(&root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                })
+                .collect();
+            names.sort();
+            names
+        }
     }
 
     impl Drop for TestRepo {
@@ -250,30 +286,30 @@ mod tests {
             "init",
         ]);
 
-        let root = repo.dir.canonicalize().unwrap();
-        let rel_names = |files: &[(PathBuf, Language)]| -> Vec<String> {
-            let mut names: Vec<String> = files
-                .iter()
-                .map(|(p, _)| {
-                    p.strip_prefix(&root)
-                        .unwrap()
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                })
-                .collect();
-            names.sort();
-            names
-        };
-
-        let files = tracked_source_files(&root, &["migrations/".to_string()]).unwrap();
-        assert_eq!(rel_names(&files), vec!["a.py", "keep/b.py"]);
+        assert_eq!(
+            repo.source_files(&["migrations/".to_string()]),
+            vec!["a.py", "keep/b.py"]
+        );
 
         // Empty ignore list: migrations/ comes back, but gen.py (tracked-but-gitignored) never
         // does -- that half comes from the repo's own gitignore rules, not the `ignore` config.
-        let files = tracked_source_files(&root, &[]).unwrap();
         assert_eq!(
-            rel_names(&files),
+            repo.source_files(&[]),
             vec!["a.py", "keep/b.py", "migrations/0001_x.py"]
+        );
+    }
+
+    #[test]
+    fn rust_ui_tests_with_a_stderr_snapshot_are_dropped() {
+        let repo = TestRepo::new();
+        repo.write("src/lib.rs", "// a\n");
+        repo.write("tests/ui/fails.rs", "// b\n");
+        repo.write("tests/ui/fails.stderr", "error: at tests/ui/fails.rs:2:5\n");
+        repo.write("tests/ui/passes.rs", "// c\n");
+        repo.git(&["add", "-A"]);
+        assert_eq!(
+            repo.source_files(&[]),
+            vec!["src/lib.rs", "tests/ui/passes.rs"]
         );
     }
 }

@@ -190,6 +190,23 @@ const FIXTURES: &[Fixture] = &[
             "a#b",
         ],
     },
+    Fixture {
+        name: "sample.rs",
+        init_comment: "// init",
+        trailing_remark: "// trailing remark about the divisor",
+        survive: &[
+            "// Copyright 2024 Example Corp. Licensed under the MIT License.",
+            "// SPDX-License-Identifier: MIT",
+            "//! A small stats helper.",
+            "/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));",
+            "/// Sample input.",
+            "\"// not a comment\"",
+            "r#\"/* not a comment */ \"quoted\" // either\"#",
+            "// SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.",
+            "b\"// still not a comment\"",
+            "'/'",
+        ],
+    },
 ];
 
 fn git(dir: &Path, args: &[&str]) {
@@ -331,6 +348,10 @@ fn python3_available() -> bool {
     Command::new("python3").arg("--version").output().is_ok()
 }
 
+fn rustc_available() -> bool {
+    Command::new("rustc").arg("--version").output().is_ok()
+}
+
 #[test]
 fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
     let dir = setup_repo();
@@ -380,6 +401,40 @@ fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
     }
 }
 
+/// sample.rs after `--delete` still compiles, and its `#![deny(missing_docs)]` makes rustc
+/// itself confirm that every doc comment survived.
+#[test]
+fn rust_delete_output_still_compiles() {
+    let dir = setup_repo();
+    run(commentreducr()
+        .arg("comments")
+        .arg(dir.path())
+        .arg("--delete"))
+    .success();
+
+    let after = read(dir.path(), "sample.rs");
+    assert!(after.contains("    (mean, variance)\n"), "{after}");
+    if rustc_available() {
+        let status = Command::new("rustc")
+            .args([
+                "--edition",
+                "2021",
+                "--crate-type",
+                "lib",
+                "--emit=metadata",
+            ])
+            .arg("-o")
+            .arg(dir.path().join("sample.rmeta"))
+            .arg(dir.path().join("sample.rs"))
+            .status()
+            .unwrap();
+        assert!(
+            status.success(),
+            "rustc rejected the rewritten file:\n{after}"
+        );
+    }
+}
+
 fn snapshot(dir: &Path) -> Vec<String> {
     FIXTURES.iter().map(|f| read(dir, f.name)).collect()
 }
@@ -396,7 +451,7 @@ fn delete_dry_run_counts_but_writes_nothing() {
         .arg("--dry-run"))
     .success()
     .stdout_contains(" deleted (")
-    .stderr_contains("5 files scanned, 5 changed, 0 skipped");
+    .stderr_contains("6 files scanned, 6 changed, 0 skipped");
 
     assert_eq!(snapshot(dir.path()), before, "dry run modified files");
 }
@@ -417,7 +472,7 @@ fn broken_file_is_skipped_and_others_still_processed() {
         .arg("--delete"))
     .code(1)
     .stderr_contains("warning: skipping")
-    .stderr_contains("6 files scanned, 5 changed, 1 skipped");
+    .stderr_contains("7 files scanned, 6 changed, 1 skipped");
 
     for f in FIXTURES {
         assert!(

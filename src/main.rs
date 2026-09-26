@@ -16,7 +16,7 @@ const AFTER_LONG_HELP: &str = "endpoint, model, docstrings_model, api_key, worke
                                can also be set in ~/.config/commentreducr/config.toml; flags \
                                win.";
 
-/// Delete or reduce comments (Python, JS/TS, YAML) or Python docstrings in git-tracked files.
+/// Delete or reduce comments (Python, JS/TS, YAML, Rust) or Python docstrings in git-tracked files.
 #[derive(Parser, Debug)]
 #[command(name = "commentreducr", version)]
 struct Cli {
@@ -26,7 +26,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Comments in Python, JS/TS and YAML files
+    /// Comments in Python, JS/TS, YAML and Rust files
     #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
     Comments(Opts),
     /// Python docstrings (module, class, function)

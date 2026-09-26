@@ -10,6 +10,8 @@ the binary runs there, and every changed file is checked:
 - Python, docstrings: the AST must be identical once docstrings are removed from both sides.
 - YAML: `yaml.safe_load_all` must yield equal documents (files PyYAML cannot parse before the
   run are skipped and counted).
+- Rust: the token stream must be identical (`rust_tokens`: plain comments dropped, doc comments
+  and string/char literals kept whole, whitespace ignored).
 
 Exit status 1 on any mismatch, skipped file (parse error / internal error) or compile failure.
 Needs PyYAML for YAML corpora. tools/ is not part of the crate; this is a development check.
@@ -18,12 +20,13 @@ Needs PyYAML for YAML corpora. tools/ is not part of the crate; this is a develo
 import argparse
 import ast
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
-SUFFIXES = {".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".yml", ".yaml"}
+SUFFIXES = {".py", ".pyi", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".yml", ".yaml", ".rs"}
 
 
 def git(repo, *args):
@@ -68,6 +71,55 @@ def check_python(old, new, target):
     return ast.dump(a) == ast.dump(b)
 
 
+# Where a Rust comment scan must not look inside: a comment, a (raw, byte or C) string, a char
+# literal. A quote that does not start a char literal is a lifetime or label.
+RUST_SPECIAL = re.compile(r"""//|/\*|(?<!\w)[bc]?r#*"|(?<!\w)[bc]?"|"|'""")
+RUST_CHAR = re.compile(r"""'(?:[^'\\\n]|\\(?:u\{[0-9a-fA-F_]*\}|x[0-9a-fA-F]{2}|.))'""")
+RUST_STRING = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"', re.S)
+
+
+def rust_tokens(src):
+    """Plain comments dropped, doc comments and string/char literals kept whole, the rest split on
+    whitespace: equal before and after only if nothing but plain comments and whitespace changed."""
+    out, i = [], 0
+    while m := RUST_SPECIAL.search(src, i):
+        out.extend(src[i : m.start()].split())
+        s, tok = m.start(), m.group()
+        if tok == "//":
+            e = src.find("\n", s)
+            e = len(src) if e < 0 else e
+            text = src[s:e].rstrip("\r")
+            if text.startswith(("///", "//!")) and not text.startswith("////"):
+                out.append(text)
+        elif tok == "/*":
+            depth, e = 1, s + 2
+            while depth and e < len(src):
+                if src.startswith("/*", e):
+                    depth, e = depth + 1, e + 2
+                elif src.startswith("*/", e):
+                    depth, e = depth - 1, e + 2
+                else:
+                    e += 1
+            if src.startswith(("/**", "/*!"), s) and not src.startswith(("/***", "/**/"), s):
+                out.append(src[s:e])
+        elif tok == "'":
+            char = RUST_CHAR.match(src, s)
+            e = char.end() if char else s + 1
+            out.append(src[s:e])
+        elif "r" in tok:
+            close = '"' + "#" * tok.count("#")
+            e = src.find(close, m.end())
+            e = len(src) if e < 0 else e + len(close)
+            out.append(src[s:e])
+        else:
+            string = RUST_STRING.match(src, m.end() - 1)
+            e = string.end() if string else len(src)
+            out.append(src[s:e])
+        i = e
+    out.extend(src[i:].split())
+    return out
+
+
 def run_target(binary, repo, target):
     proc = subprocess.run([binary, target, repo, "--delete"], capture_output=True, text=True)
     skipped = [l for l in proc.stderr.splitlines() if l.startswith("warning: skipping")]
@@ -92,6 +144,8 @@ def run_target(binary, repo, target):
                     unparsable += 1
                     continue
                 ok = list(yaml.safe_load_all(new)) == before
+            elif ext == ".rs":
+                ok = rust_tokens(old.decode("utf-8", "surrogateescape")) == rust_tokens(new.decode("utf-8", "surrogateescape"))
             else:
                 continue  # JS/TS: no parser at hand; the tree-sitter reparse in the tool is the guard
         except SyntaxError as e:

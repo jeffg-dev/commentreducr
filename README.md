@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/commentreducr.svg)](https://crates.io/crates/commentreducr)
 [![CI](https://github.com/jeffg-dev/commentreducr/actions/workflows/ci.yml/badge.svg)](https://github.com/jeffg-dev/commentreducr/actions/workflows/ci.yml)
 
-Strips low-value comments from JS/TS/Python/YAML and low-value Python docstrings in a git
+Strips low-value comments from JS/TS/Python/YAML/Rust and low-value Python docstrings in a git
 repo, keeping only the ones that say something the code cannot: a hazard, a caution, a
 workaround, a caller contract. Never touches code, strings or structural comments.
 
@@ -145,6 +145,8 @@ commentreducr docstrings .                    # same for Python docstrings; --de
 Both subcommands only process files `git ls-files` reports as tracked, so untracked scratch
 files and anything `.gitignore`d are left alone -- and a tracked file that now matches a
 gitignore rule (force-added with `git add -f`, or ignored after it was tracked) is skipped too.
+So is a Rust UI test (a `.rs` file with a tracked `.stderr` beside it, as trybuild and ui_test
+keep): its expected compiler output pins line numbers that deleting a comment line would shift.
 The `ignore` config key adds more gitignore-syntax patterns on top of that, see below. `--delete`
 removes every non-structural comment/docstring outright, no LLM. `--reduce` (the default) is
 pickier: short, sparse or code-like blocks are left alone, and dense blocks go to a local LLM
@@ -155,8 +157,10 @@ everything, including tuning flags.
 
 Structural comments are never touched by either mode: linter/type-checker directives
 (`# noqa`, `@ts-ignore`, `eslint-*`, ...), `TODO`/`FIXME`/`HACK`/`NOTE`, licenses and SPDX
-headers, shebangs, editor modelines, JSDoc blocks, and language-specific pragmas. The full list
-is in [DESIGN.md](DESIGN.md).
+headers, shebangs, editor modelines, JSDoc blocks, Rust doc comments (`///`, `//!`, `/** */`:
+rustdoc renders them and runs their examples as doctests) and `// SAFETY:` comments (clippy's
+`undocumented_unsafe_blocks` looks for them), and language-specific pragmas. The full list is in
+[DESIGN.md](DESIGN.md).
 
 For docstrings, `--delete` and `--reduce` both always keep: doctests, a module docstring in a
 file that reads `__doc__` (argparse/click render it as help text), license text, a docstring
@@ -189,10 +193,13 @@ summary plus at most a short paragraph or Args/Returns list.
 
 ## Safety
 
-None of this touches anything that is not a comment or docstring: string and template
-literals, regex literals, and JSX text are byte-for-byte untouched. `tools/corpus_check.py`
-runs `--delete` over a tree and asserts the Python AST (modulo docstrings) and every YAML
-document are unchanged; it passes on the Python stdlib and 1266 real-world YAML files.
+None of this touches anything that is not a comment or docstring: string, raw string and
+template literals, regex literals, and JSX text are byte-for-byte untouched.
+`tools/corpus_check.py` runs `--delete` over a tree and asserts the Python AST (modulo
+docstrings), every YAML document and the Rust token stream are unchanged; it passes on the
+Python stdlib and 1266 real-world YAML files, and on 332 crates.io crates plus the Rust standard
+library (13,126 `.rs` files) it finds no change beyond plain comments. 1,665 of those files,
+mostly generated wasm-bindgen code, fail to parse and are skipped.
 
 Files that fail to parse are skipped with a warning and never written. To report one, run
 `commentreducr comments --diagnose <path>`: it parses only, touches nothing, and prints a

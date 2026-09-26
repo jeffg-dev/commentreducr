@@ -8,6 +8,7 @@ pub enum Language {
     TypeScript,
     Tsx,
     Yaml,
+    Rust,
 }
 
 impl Language {
@@ -18,6 +19,7 @@ impl Language {
             "ts" | "mts" | "cts" => Some(Language::TypeScript),
             "tsx" => Some(Language::Tsx),
             "yml" | "yaml" => Some(Language::Yaml),
+            "rs" => Some(Language::Rust),
             _ => None,
         }
     }
@@ -35,7 +37,7 @@ impl Language {
 pub enum CommentKind {
     /// `# ...` or `// ...`
     Line,
-    /// `/* ... */` (JS/TS only)
+    /// `/* ... */` (JS/TS and Rust)
     Block,
 }
 
@@ -54,6 +56,8 @@ pub struct Comment {
     pub own_line: bool,
     /// Non-whitespace code follows the comment on its last line (e.g. `foo(/* x */ 1)` or `/* x */ let y;`).
     pub code_after: bool,
+    /// A Rust doc comment (`///`, `//!`, `/** */`, `/*! */`): a `#[doc]` attribute, not a comment.
+    pub doc: bool,
 }
 
 /// A group of comments treated as one unit: either a single Block comment, a single trailing/inline

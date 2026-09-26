@@ -1,6 +1,7 @@
-//! tree-sitter based comment extraction. Comments are `comment` nodes in all five grammars;
-//! strings, template literals, regex literals, JSX text, Python docstrings, and YAML block/quoted
-//! scalars are never comments, so the grammar does the hard work for us.
+//! tree-sitter based comment extraction. Comments are `comment` nodes in the JS/TS, Python and
+//! YAML grammars and `line_comment` / `block_comment` nodes in Rust's; strings, template literals,
+//! regex literals, JSX text, Python docstrings, YAML block/quoted scalars and Rust raw strings are
+//! never comments, so the grammar does the hard work for us.
 use crate::rewrite::{line_end, line_start};
 use crate::types::{Comment, CommentBlock, CommentKind, Language};
 use anyhow::{Result, anyhow};
@@ -15,6 +16,7 @@ fn ts_language(lang: Language) -> tree_sitter::Language {
         Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         Language::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
         Language::Yaml => tree_sitter_yaml::LANGUAGE.into(),
+        Language::Rust => tree_sitter_rust::LANGUAGE.into(),
     }
 }
 
@@ -33,19 +35,31 @@ fn leading_whitespace(src: &str, pos: usize) -> String {
 
 fn make_comment(src: &str, node: &tree_sitter::Node) -> Comment {
     let start = node.start_byte();
-    let end = node.end_byte();
-    let text = src[start..end].to_string();
-    let kind = if node.kind() == "html_comment" || text.starts_with("/*") {
+    let mut end = node.end_byte();
+    let kind = if node.kind() == "html_comment" || src[start..end].starts_with("/*") {
         CommentKind::Block
     } else {
         CommentKind::Line
     };
+    // A line comment ends before its line terminator, but the Python and Rust grammars include a
+    // CRLF line's `\r` (Rust a doc comment's `\n` too), which a trailing-comment delete would eat.
+    if kind == CommentKind::Line {
+        end = start + src[start..end].trim_end_matches(['\r', '\n']).len();
+    }
+    let text = src[start..end].to_string();
     let start_line = node.start_position().row;
-    let end_line = node.end_position().row;
+    let end_line = start_line + text.matches('\n').count();
     let ls = line_start(src, start);
     let own_line = src[ls..start].chars().all(|c| c.is_whitespace());
     let le = line_end(src, end);
     let code_after = !src[end..le].trim().is_empty();
+    let mut cursor = node.walk();
+    let doc = node.children(&mut cursor).any(|c| {
+        matches!(
+            c.kind(),
+            "outer_doc_comment_marker" | "inner_doc_comment_marker"
+        )
+    });
     Comment {
         start,
         end,
@@ -55,6 +69,7 @@ fn make_comment(src: &str, node: &tree_sitter::Node) -> Comment {
         end_line,
         own_line,
         code_after,
+        doc,
     }
 }
 
@@ -114,7 +129,10 @@ pub fn extract_comments(src: &str, lang: Language) -> Result<Vec<Comment>> {
     let mut cursor = tree.root_node().walk();
     loop {
         let node = cursor.node();
-        if node.kind() == "comment" || node.kind() == "html_comment" {
+        if matches!(
+            node.kind(),
+            "comment" | "html_comment" | "line_comment" | "block_comment"
+        ) {
             comments.push(make_comment(src, &node));
         }
         if cursor.goto_first_child() {
@@ -224,7 +242,8 @@ fn single_block(src: &str, c: Comment) -> CommentBlock {
 }
 
 /// Groups comments into blocks (see `CommentBlock` doc). Consecutive own-line Line comments on
-/// adjacent lines with identical indentation merge; everything else is its own block.
+/// adjacent lines with identical indentation merge, unless one is a Rust doc comment and the
+/// other is not; everything else is its own block.
 pub fn group_blocks(src: &str, comments: Vec<Comment>) -> Vec<CommentBlock> {
     let mut blocks: Vec<CommentBlock> = Vec::new();
     for c in comments {
@@ -235,6 +254,7 @@ pub fn group_blocks(src: &str, comments: Vec<Comment>) -> Vec<CommentBlock> {
                     && !last.code_after
                     && c.start_line == last.end_line + 1
                     && leading_whitespace(src, c.start) == last.indent
+                    && last.comments.last().is_some_and(|prev| prev.doc == c.doc)
             });
         if can_merge {
             let last = blocks.last_mut().unwrap();
@@ -348,6 +368,63 @@ function App() {
         assert_eq!(blocks[1].kind, CommentKind::Line);
         assert!(!blocks[1].own_line);
         assert!(!blocks[1].code_after);
+    }
+
+    #[test]
+    fn rust_strings_are_not_comments_and_doc_comments_end_on_their_line() {
+        let src = r##"//! Crate docs.
+/// Item docs.
+// regular
+fn f<'a>(s: &'a str) -> &'a str {
+    let r = r#"// not "a" comment"#; // trailing
+    let c = '/'; /* nested /* inner */ outer */
+    s
+}
+"##;
+        assert!(diagnose(src, Language::Rust).unwrap().is_none());
+        let comments = extract_comments(src, Language::Rust).unwrap();
+        let texts: Vec<(&str, bool)> = comments.iter().map(|c| (c.text.as_str(), c.doc)).collect();
+        assert_eq!(
+            texts,
+            vec![
+                ("//! Crate docs.", true),
+                ("/// Item docs.", true),
+                ("// regular", false),
+                ("// trailing", false),
+                ("/* nested /* inner */ outer */", false),
+            ]
+        );
+        for c in &comments {
+            assert_eq!(&src[c.start..c.end], c.text, "offsets must index src");
+            assert_eq!(c.start_line, c.end_line);
+            assert!(!c.code_after || c.text.starts_with("/*"));
+        }
+
+        // A doc comment never merges with a plain comment on the next line.
+        let blocks = group_blocks(src, comments);
+        let sizes: Vec<usize> = blocks.iter().map(|b| b.comments.len()).collect();
+        assert_eq!(sizes, vec![2, 1, 1, 1]);
+    }
+
+    #[test]
+    fn deleting_a_trailing_comment_keeps_crlf() {
+        // tree-sitter-python and tree-sitter-rust put a CRLF line's `\r` inside the comment.
+        for (src, lang, want) in [
+            (
+                "x = 1  # c\r\ny = 2\r\n",
+                Language::Python,
+                "x = 1\r\ny = 2\r\n",
+            ),
+            (
+                "let x = 1; // c\r\n/// d\r\nfn f() {}\r\n",
+                Language::Rust,
+                "let x = 1;\r\n/// d\r\nfn f() {}\r\n",
+            ),
+        ] {
+            let blocks = group_blocks(src, extract_comments(src, lang).unwrap());
+            let edit = crate::rewrite::delete_edit(src, &blocks[0]);
+            assert_eq!(crate::rewrite::apply(src, vec![edit]), want);
+        }
     }
 
     #[test]

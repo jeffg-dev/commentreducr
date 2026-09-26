@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rust CLI that strips low-value comments from JS/TS/Python/YAML, and low-value Python
+Rust CLI that strips low-value comments from JS/TS/Python/YAML/Rust, and low-value Python
 docstrings. Read DESIGN.md first.
 
 - Before committing: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test`. CI enforces all three.

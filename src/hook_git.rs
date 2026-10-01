@@ -934,7 +934,10 @@ mod tests {
         )
         .unwrap();
         let installed = install(&repo.0).unwrap();
-        assert_eq!(installed, hooks.join("pre-push"));
+        assert_eq!(
+            installed.canonicalize().unwrap(),
+            hooks.join("pre-push").canonicalize().unwrap()
+        );
         assert_eq!(install(&repo.0).unwrap(), installed);
         assert_eq!(
             std::fs::read_to_string(hooks.join("pre-push.commentreducr-original")).unwrap(),

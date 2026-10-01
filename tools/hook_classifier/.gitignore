@@ -1,0 +1,13 @@
+/.venv/
+/artifacts/
+/artifacts-modernbert/
+/raw/
+/cache/
+/__pycache__/
+/batch_a.jsonl
+/batch_b.jsonl
+/pilot_prompt.txt
+/pilot_response.json
+/labels_a_progress.json
+/labels_b_progress.json
+/.generation.lock

@@ -1,0 +1,9 @@
+{
+  "rows": 8,
+  "initial_verdict_agreement": 0.875,
+  "clarified_verdict_agreement": 1.0,
+  "clarification": "Observable public buffering behavior is a caller contract even when visible in implementation.",
+  "changed_ids": [
+    "pilot-03"
+  ]
+}

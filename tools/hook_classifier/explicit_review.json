@@ -1,0 +1,494 @@
+{
+  "annotation_method": "explicit_per_row",
+  "labeler_model": "gpt-6-luna",
+  "reviewers": 3,
+  "rows": 1088,
+  "assignment_seed": 8291,
+  "blinding": "Only id,kind,text,context; no prior labels/generator prompts/results",
+  "initial_procedure_issue": "Unlisted rows received default PASS; some were not individually adjudicated",
+  "initial_snapshots": [
+    "labels_initial.jsonl",
+    "curated_holdout_labels_initial.jsonl",
+    "results_initial.json",
+    "results_modernbert_initial.json"
+  ],
+  "rubric_sha256": "36f02291bb92839dd87ea380b8d8704be37310c85044507364c8b2ef80e72b3d",
+  "sources": {
+    "corpus.jsonl": {
+      "rows": 954,
+      "counts": {
+        "PASS": 529,
+        "FLAG": 425
+      },
+      "rules": {
+        "leaky_reference": 80,
+        "narration": 173,
+        "noise": 172
+      },
+      "changed_verdicts": 164,
+      "changed_ids": [
+        "py-0186-3",
+        "py-0212-0",
+        "py-0176-1",
+        "py-0172-3",
+        "py-0176-2",
+        "py-0082-0",
+        "py-0042-3",
+        "py-0093-0",
+        "py-0012-3",
+        "py-0239-1",
+        "py-0124-2",
+        "py-0137-3",
+        "py-0022-1",
+        "py-0108-1",
+        "py-0210-0",
+        "py-0088-0",
+        "py-0158-3",
+        "py-0136-0",
+        "py-0148-3",
+        "py-0118-0",
+        "py-0015-0",
+        "py-0023-0",
+        "py-0172-2",
+        "py-0039-2",
+        "py-0232-0",
+        "py-0220-2",
+        "py-0171-3",
+        "py-0033-1",
+        "py-0109-3",
+        "py-0090-0",
+        "py-0214-1",
+        "py-0035-1",
+        "py-0173-3",
+        "py-0028-2",
+        "py-0238-3",
+        "py-0080-3",
+        "py-0192-2",
+        "py-0132-2",
+        "py-0135-3",
+        "py-0103-0",
+        "py-0192-3",
+        "py-0108-3",
+        "py-0145-1",
+        "py-0045-3",
+        "py-0142-3",
+        "py-0067-0",
+        "py-0082-3",
+        "py-0035-0",
+        "py-0197-3",
+        "py-0143-1",
+        "py-0193-1",
+        "py-0018-1",
+        "py-0170-0",
+        "py-0094-2",
+        "py-0183-3",
+        "py-0070-0",
+        "py-0045-0",
+        "py-0056-0",
+        "py-0102-0",
+        "py-0125-3",
+        "py-0192-0",
+        "py-0067-1",
+        "py-0056-1",
+        "py-0054-2",
+        "py-0202-0",
+        "py-0237-0",
+        "py-0232-3",
+        "py-0092-0",
+        "py-0237-3",
+        "py-0163-1",
+        "py-0130-0",
+        "py-0028-0",
+        "py-0167-3",
+        "py-0052-0",
+        "py-0117-0",
+        "py-0230-1",
+        "py-0123-0",
+        "py-0018-3",
+        "py-0172-0",
+        "py-0125-0",
+        "py-0077-1",
+        "py-0117-3",
+        "py-0031-0",
+        "py-0008-3",
+        "py-0076-1",
+        "py-0027-1",
+        "py-0118-3",
+        "py-0123-3",
+        "py-0175-0",
+        "py-0128-3",
+        "py-0173-0",
+        "py-0113-1",
+        "py-0162-0",
+        "py-0023-2",
+        "py-0093-3",
+        "py-0018-0",
+        "py-0183-2",
+        "py-0173-1",
+        "py-0062-3",
+        "py-0052-2",
+        "py-0135-0",
+        "py-0087-0",
+        "py-0142-0",
+        "py-0043-3",
+        "py-0005-0",
+        "py-0180-0",
+        "py-0068-3",
+        "py-0063-1",
+        "py-0198-1",
+        "py-0061-1",
+        "py-0050-0",
+        "py-0034-3",
+        "py-0097-1",
+        "py-0178-0",
+        "py-0088-3",
+        "py-0002-1",
+        "py-0155-0",
+        "py-0233-1",
+        "py-0131-3",
+        "py-0184-3",
+        "py-0038-3",
+        "py-0181-0",
+        "py-0027-0",
+        "py-0178-3",
+        "py-0229-1",
+        "py-0010-0",
+        "py-0074-2",
+        "py-0140-0",
+        "py-0171-2",
+        "py-0148-0",
+        "py-0065-0",
+        "py-0152-0",
+        "py-0191-0",
+        "py-0101-0",
+        "py-0072-0",
+        "py-0163-0",
+        "py-0058-1",
+        "py-0138-3",
+        "py-0092-3",
+        "py-0029-3",
+        "py-0091-3",
+        "py-0050-2",
+        "py-0063-2",
+        "py-0091-2",
+        "py-0091-0",
+        "py-0198-0",
+        "py-0124-0",
+        "py-0037-0",
+        "py-0057-0",
+        "py-0118-1",
+        "py-0077-3",
+        "py-0090-1",
+        "py-0101-3",
+        "py-0223-0",
+        "py-0053-0",
+        "py-0212-2",
+        "py-0099-2",
+        "py-0113-3",
+        "py-0048-2",
+        "py-0063-0",
+        "py-0165-0",
+        "py-0149-2",
+        "py-0213-3",
+        "py-0075-2"
+      ],
+      "labels_sha256": "e23fd132bc51f899ec3ab23cb6bcbb3d3fae9b9f3b0d29c28744c92202ecb21a"
+    },
+    "curated_holdout.jsonl": {
+      "rows": 134,
+      "counts": {
+        "PASS": 28,
+        "FLAG": 106
+      },
+      "rules": {
+        "noise": 37,
+        "narration": 36,
+        "leaky_reference": 33
+      },
+      "changed_verdicts": 16,
+      "changed_ids": [
+        "curated-doc-0027",
+        "curated-doc-0005",
+        "curated-doc-0030",
+        "curated-doc-0007",
+        "curated-py-0004",
+        "curated-py-0037",
+        "curated-py-0063",
+        "curated-py-0065",
+        "curated-py-0002",
+        "curated-py-0021",
+        "curated-py-0045",
+        "curated-py-0049",
+        "curated-py-0061",
+        "curated-doc-0004",
+        "curated-doc-0023",
+        "curated-py-0022"
+      ],
+      "labels_sha256": "9c46ad9248854184a60e93271ca31ce6a2831e83ba0ab1ce42edebd89d7ff45a"
+    }
+  },
+  "limitation": "Model-produced synthetic labels, not human-validated ground truth",
+  "independent_audit": {
+    "rows": 64,
+    "sampling": "16PASS and16FLAG from each of reviewersB/C; not population representative",
+    "agreements": 55,
+    "disagreements": 9,
+    "verdict_agreement": 0.859375,
+    "labels_frozen_before_audit": true,
+    "changes_from_audit": 0,
+    "cases": [
+      {
+        "id": "py-0178-0",
+        "kind": "module_docstring",
+        "text": "Fixtures that give each pipeline test its own scratch warehouse directory.",
+        "primary": {
+          "id": "py-0178-0",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "It states the fixture's isolation guarantee that each pipeline test receives its own scratch warehouse directory.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "8e7038550a1d8dd8dcd25f4138b818fd3a56a147353fd743e8c2e05da053109e"
+        },
+        "audit": {
+          "id": "py-0178-0",
+          "verdict": "FLAG",
+          "rules": [
+            "narration"
+          ],
+          "evidence": [
+            "Fixtures that give each pipeline test its own scratch warehouse directory."
+          ],
+          "reason": "This only summarizes the visible fixture setup and its test purpose; it gives no isolation limit or cleanup caveat for callers.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "py-0223-0",
+        "kind": "module_docstring",
+        "text": "Memoization helpers for expensive lookups in dev tooling.\n\nCached results are keyed on positional arguments only, which must be\nhashable. Cached values are returned by reference, so callers that mutate\na returned list or dict will corrupt later hits.",
+        "primary": {
+          "id": "py-0223-0",
+          "verdict": "FLAG",
+          "rules": [
+            "narration"
+          ],
+          "evidence": [
+            "Memoization helpers for expensive lookups in dev tooling."
+          ],
+          "reason": "The module summary only describes the helper's general use; the remaining sentences provide the meaningful argument and cached-value constraints.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "362f12b9a841a3942495f8fbe90c83fb38adae1c8d10abf19f606f16b3884b62"
+        },
+        "audit": {
+          "id": "py-0223-0",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "It documents positional-only hashable cache keys and warns that returned mutable values are shared by reference across later hits.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "py-0074-2",
+        "kind": "test_docstring",
+        "text": "A symlink inside the root that points outside it is rejected.\n\nValidation resolves real paths before comparing against the root, so a\nlexically clean name like link/data.txt still fails when link targets a\ndirectory elsewhere on disk.",
+        "primary": {
+          "id": "py-0074-2",
+          "verdict": "FLAG",
+          "rules": [
+            "narration"
+          ],
+          "evidence": [
+            "Validation resolves real paths before comparing against the root, so a\nlexically clean name like link/data.txt still fails when link targets a\ndirectory elsewhere on disk."
+          ],
+          "reason": "After stating the guarded symlink behavior, the docstring narrates the real-path comparison used to implement it.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "2ef8c170c08a1b1b46c1a503135c641a79bfff621d071c5c6742846974f2f591"
+        },
+        "audit": {
+          "id": "py-0074-2",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "It states the symlink escape behavior guarded by the test and explains why a lexically safe path can still resolve outside the root.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "py-0008-3",
+        "kind": "module_docstring",
+        "text": "Lock order is cache_lock, then log_lock, everywhere in this module.\n\nTaking them in the reverse order from a new helper will deadlock against\nstore() and flush(), and nothing here detects it. File writes happen after\nboth locks are released.",
+        "primary": {
+          "id": "py-0008-3",
+          "verdict": "FLAG",
+          "rules": [
+            "leaky_reference"
+          ],
+          "evidence": [
+            "against\nstore() and flush()"
+          ],
+          "reason": "It explains lock ordering through the named sibling functions that acquire those locks, a cross-function dependency reference; the ordering requirement itself is useful but the named reference flags the block.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "ed7385ebb57f847143cdca8ad8d70abe0942d413946d1095d6e76cd45e73b179"
+        },
+        "audit": {
+          "id": "py-0008-3",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "It records the required lock order, the deadlock risk of reversing it, and the point at which file I/O occurs relative to the locks.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "py-0002-3",
+        "kind": "function_docstring",
+        "text": "Yield newline-stripped lines from successive read(n) calls.\n\nread must return an empty string only at EOF; returning an empty string or None\nwhen no data is ready ends the iteration early. A final line with no newline is\nheld back and yielded only after EOF.",
+        "primary": {
+          "id": "py-0002-3",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "The docstring specifies the reader callback contract and useful stream edge cases, including how empty reads and a final unterminated line affect iteration.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "59f3b25cec900065b1815464214936e737c45f029fc3b92e025d3ab81a578536"
+        },
+        "audit": {
+          "id": "py-0002-3",
+          "verdict": "FLAG",
+          "rules": [
+            "narration"
+          ],
+          "evidence": [
+            "Yield newline-stripped lines from successive read(n) calls."
+          ],
+          "reason": "The opening sentence repeats the helper's name and visible loop output; the EOF and incomplete-final-line rules are the useful contract.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "py-0015-1",
+        "kind": "class_docstring",
+        "text": "Acknowledges messages by delivery tag.\n\nAcknowledging an unknown or already-acknowledged tag returns False rather\nthan raising, so a retried command that sends a duplicate ack is harmless.",
+        "primary": {
+          "id": "py-0015-1",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "The class docstring explains the benign behavior for unknown and duplicate acknowledgements, a useful idempotency guarantee beyond the basic operation.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "852269483ddb361b900b4717b9c0d2f5d3e5b94961ebbcfc005933ff312c14a1"
+        },
+        "audit": {
+          "id": "py-0015-1",
+          "verdict": "FLAG",
+          "rules": [
+            "narration"
+          ],
+          "evidence": [
+            "Acknowledges messages by delivery tag."
+          ],
+          "reason": "This opening sentence only restates the class and method purpose; the false-return behavior for duplicate acknowledgments is the useful contract.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "py-0020-3",
+        "kind": "class_docstring",
+        "text": "Recycles bytearray buffers of one fixed size.\n\nBuffers are not zeroed on release, so a recycled buffer still holds the previous\ncontents. Callers must overwrite or slice to the number of bytes they actually read.\nReleasing a buffer of the wrong length raises ValueError rather than polluting the pool.",
+        "primary": {
+          "id": "py-0020-3",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "The docstring warns that recycled buffers retain prior bytes, gives the safe read/use constraint, and states the error for returning a wrong-sized buffer.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "1fc8a4e6f3c8c1105d5decd2d06c9d1c11f111e506b033e1ad105f49a7d81280"
+        },
+        "audit": {
+          "id": "py-0020-3",
+          "verdict": "FLAG",
+          "rules": [
+            "narration"
+          ],
+          "evidence": [
+            "Recycles bytearray buffers of one fixed size."
+          ],
+          "reason": "This generic summary only names the pool's visible purpose; the unzeroed contents and wrong-length rejection are the useful constraints.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "py-0027-3",
+        "kind": "function_docstring",
+        "text": "Convert records in batches, collecting failures instead of aborting.\n\nReturns a tuple of (converted, failed). When convert raises ValueError\nfor a batch, every record in that batch is placed in failed, even if\nonly one of them was invalid. Other exception types propagate.",
+        "primary": {
+          "id": "py-0027-3",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "It documents per-batch failure handling, the returned partitions, and which exception types are caught versus propagated.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "555dc69a69fe40e70c13c5050b3578f2971981dc91754c2aa2aa1482a61eccaa"
+        },
+        "audit": {
+          "id": "py-0027-3",
+          "verdict": "FLAG",
+          "rules": [
+            "narration"
+          ],
+          "evidence": [
+            "Convert records in batches, collecting failures instead of aborting."
+          ],
+          "reason": "The opening sentence merely summarizes the function's name-level operation; the batch-wide ValueError and other-exception behavior are the substantive contract.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      },
+      {
+        "id": "curated-py-0017",
+        "kind": "comment",
+        "text": "# This looks like it should be a set, but order matters: the\n# middleware list is applied outermost-first and auth must wrap\n# rate-limiting so that unauthenticated calls are rejected before\n# they consume quota.",
+        "primary": {
+          "id": "curated-py-0017",
+          "verdict": "PASS",
+          "rules": [],
+          "evidence": [],
+          "reason": "It explains the non-obvious ordering requirement and security consequence of placing authentication outside rate limiting.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row",
+          "input_sha256": "bda1a5baab7c50cae9dcd2772f973347fa1779383e0fed116735dea0e0d62b83"
+        },
+        "audit": {
+          "id": "curated-py-0017",
+          "verdict": "FLAG",
+          "rules": [
+            "leaky_reference"
+          ],
+          "evidence": [
+            "auth must wrap\n# rate-limiting"
+          ],
+          "reason": "It explains ordering through a dependency between named middleware siblings; the code-local security hazard is that unauthenticated calls consume quota.",
+          "labeler_model": "gpt-6-luna",
+          "annotation_method": "explicit_per_row"
+        }
+      }
+    ]
+  }
+}

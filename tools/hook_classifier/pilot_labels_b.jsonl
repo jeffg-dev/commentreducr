@@ -1,0 +1,8 @@
+{"id":"pilot-01","verdict":"FLAG","rules":["narration"],"evidence":["This function looks the key up in the cache dictionary."],"reason":"It narrates the cache lookup, expiration check, compute call, and storage steps visible in the implementation.","labeler_model":"gpt-6-luna"}
+{"id":"pilot-02","verdict":"PASS","rules":[],"evidence":[],"reason":"It explains the non-obvious mutation caused by a cache hit.","labeler_model":"gpt-6-luna"}
+{"id":"pilot-03","verdict":"PASS","rules":[],"evidence":[],"reason":"It states the class's useful input and output behavior, including retaining a partial trailing line.","labeler_model":"gpt-6-luna"}
+{"id":"pilot-04","verdict":"PASS","rules":[],"evidence":[],"reason":"It states useful output and lazy-consumption constraints beyond the signature.","labeler_model":"gpt-6-luna"}
+{"id":"pilot-05","verdict":"FLAG","rules":["narration"],"evidence":["The validator returns a list of human readable error"],"reason":"It describes the function's visible return construction and success case as implementation narration.","labeler_model":"gpt-6-luna"}
+{"id":"pilot-06","verdict":"PASS","rules":[],"evidence":[],"reason":"It explains why the ASCII digit check is needed to reject forms that int() accepts.","labeler_model":"gpt-6-luna"}
+{"id":"pilot-07","verdict":"FLAG","rules":["narration"],"evidence":["The test adds ten units of a product, removes three of them, and then\nverifies that seven units are still reported as available."],"reason":"It narrates the test's visible setup and assertion steps.","labeler_model":"gpt-6-luna"}
+{"id":"pilot-08","verdict":"PASS","rules":[],"evidence":[],"reason":"It explains the non-obvious requirement to compare serialized bytes because key order is contractual.","labeler_model":"gpt-6-luna"}

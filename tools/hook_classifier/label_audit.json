@@ -1,0 +1,169 @@
+{
+  "independent_audit_rows": 64,
+  "sampling": "16 PASS and16 FLAG from each labeler, shuffled; stratified by verdict, not population representative",
+  "initial_verdict_agreement": 0.84375,
+  "initial_agreements": 54,
+  "initial_disagreements": 10,
+  "adjudication_rows": 17,
+  "annotation_changes": 10,
+  "final_verdict_counts": {
+    "FLAG": 295,
+    "PASS": 659
+  },
+  "decisions": [
+    {
+      "id": "py-0135-0",
+      "primary_verdict": "PASS",
+      "small_review_a": "PASS",
+      "small_review_b": "FLAG",
+      "final_verdict": "PASS",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Process termination on context exit is an observable lifetime guarantee."
+    },
+    {
+      "id": "py-0093-3",
+      "primary_verdict": "FLAG",
+      "small_review_a": "PASS",
+      "small_review_b": "FLAG",
+      "final_verdict": "PASS",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "A module can document its own public API; this states streaming constraints and a consumption hazard."
+    },
+    {
+      "id": "py-0005-3",
+      "primary_verdict": "FLAG",
+      "small_review_a": "PASS",
+      "small_review_b": "PASS",
+      "final_verdict": "PASS",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0004-2",
+      "primary_verdict": "FLAG",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0150-0",
+      "primary_verdict": "FLAG",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0010-0",
+      "primary_verdict": "FLAG",
+      "small_review_a": "FLAG",
+      "small_review_b": "PASS",
+      "final_verdict": "PASS",
+      "selected_luna_annotation": "b",
+      "coordinator_note": "Whitespace trimming is observable behavior beyond the class name and constructor signature."
+    },
+    {
+      "id": "py-0138-2",
+      "primary_verdict": "FLAG",
+      "small_review_a": "PASS",
+      "small_review_b": "PASS",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "primary",
+      "coordinator_note": "The consumer-was-written passage is implementation history even alongside a current wire-protocol contract."
+    },
+    {
+      "id": "py-0096-0",
+      "primary_verdict": "FLAG",
+      "small_review_a": "FLAG",
+      "small_review_b": "PASS",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "The block narrates removal and implementation placement, even alongside a performance rationale."
+    },
+    {
+      "id": "py-0130-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0168-0",
+      "primary_verdict": "FLAG",
+      "small_review_a": "FLAG",
+      "small_review_b": "PASS",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Generic module purpose and wrapping implementation do not state a meaningful usage constraint."
+    },
+    {
+      "id": "py-0067-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0115-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0195-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "PASS",
+      "small_review_b": "PASS",
+      "final_verdict": "PASS",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0046-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0086-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0173-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    },
+    {
+      "id": "py-0230-2",
+      "primary_verdict": "PASS",
+      "small_review_a": "FLAG",
+      "small_review_b": "FLAG",
+      "final_verdict": "FLAG",
+      "selected_luna_annotation": "a",
+      "coordinator_note": "Both small-batch reviews agree under the rubric."
+    }
+  ],
+  "limitation": "Luna-produced synthetic labels with a coordinator audit are not human-validated ground truth."
+}

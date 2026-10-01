@@ -1,0 +1,32 @@
+{"id":"py-0066-1","verdict":"PASS","rules":[],"evidence":[],"reason":"It explains how to preserve the exact amount despite per-share cent rounding.","labeler_model":"gpt-6-luna"}
+{"id":"py-0048-0","verdict":"FLAG","rules":["narration"],"evidence":["Time-based cache for rendered pages."],"reason":"It gives only a generic description of the cache module without a useful caller contract.","labeler_model":"gpt-6-luna"}
+{"id":"py-0002-0","verdict":"PASS","rules":[],"evidence":[],"reason":"It states the useful batch size, newline handling, and final partial-batch behavior.","labeler_model":"gpt-6-luna"}
+{"id":"py-0112-2","verdict":"FLAG","rules":["noise"],"evidence":["The worker used to let validation exceptions escape"],"reason":"It includes historical incident background.","labeler_model":"gpt-6-luna"}
+{"id":"py-0121-2","verdict":"PASS","rules":[],"evidence":[],"reason":"It explains a global-state hazard and why a stable sort key is used.","labeler_model":"gpt-6-luna"}
+{"id":"py-0147-2","verdict":"FLAG","rules":["noise"],"evidence":["the legacy ingest service\nemitted mixed-case ids"],"reason":"It includes historical system background despite useful slug and lookup constraints.","labeler_model":"gpt-6-luna"}
+{"id":"py-0169-2","verdict":"FLAG","rules":["noise"],"evidence":["Regression: an earlier version used locale.strxfrm"],"reason":"It explicitly recounts a regression and earlier implementation.","labeler_model":"gpt-6-luna"}
+{"id":"py-0115-3","verdict":"PASS","rules":[],"evidence":[],"reason":"It states timeout behavior and a meaningful cancellation requirement for the wrapped coroutine.","labeler_model":"gpt-6-luna"}
+{"id":"py-0010-0","verdict":"PASS","rules":[],"evidence":[],"reason":"It describes the normalization form and whitespace behavior callers receive.","labeler_model":"gpt-6-luna"}
+{"id":"py-0154-2","verdict":"FLAG","rules":["noise"],"evidence":["Regression test for duplicate customers from the legacy export."],"reason":"It includes regression and historical incident narrative.","labeler_model":"gpt-6-luna"}
+{"id":"py-0097-1","verdict":"PASS","rules":[],"evidence":[],"reason":"It states the atomic-replacement constraint that the temporary file share the destination filesystem.","labeler_model":"gpt-6-luna"}
+{"id":"py-0114-2","verdict":"FLAG","rules":["noise"],"evidence":["The payout job once passed floats straight to Decimal"],"reason":"It recounts a past incident rather than only stating the contract.","labeler_model":"gpt-6-luna"}
+{"id":"py-0090-3","verdict":"FLAG","rules":["leaky_reference"],"evidence":["The downstream CSV consumer was written against a 16-bit signed\ncolumn"],"reason":"It justifies the allocator limit by referring to a dependent internal consumer.","labeler_model":"gpt-6-luna"}
+{"id":"py-0163-3","verdict":"PASS","rules":[],"evidence":[],"reason":"It states runtime requirements and exception handling needed by callers.","labeler_model":"gpt-6-luna"}
+{"id":"py-0144-0","verdict":"PASS","rules":[],"evidence":[],"reason":"It names the expiration behavior and observable removal of the entry.","labeler_model":"gpt-6-luna"}
+{"id":"py-0138-2","verdict":"PASS","rules":[],"evidence":[],"reason":"It documents the wire-format wraparound behavior and the serial-number comparison contract.","labeler_model":"gpt-6-luna"}
+{"id":"py-0096-0","verdict":"PASS","rules":[],"evidence":[],"reason":"It explains the non-obvious scheduling choice that keeps eviction work off reader calls.","labeler_model":"gpt-6-luna"}
+{"id":"py-0049-1","verdict":"PASS","rules":[],"evidence":[],"reason":"It states the failure outcome the test guards: the original file remains intact.","labeler_model":"gpt-6-luna"}
+{"id":"py-0064-1","verdict":"PASS","rules":[],"evidence":[],"reason":"It names the behavior and expected result guarded by the test.","labeler_model":"gpt-6-luna"}
+{"id":"py-0057-3","verdict":"FLAG","rules":["leaky_reference"],"evidence":["Intended to be passed straight to the response streamer."],"reason":"It names a specific internal consumer and how it should use the returned handle.","labeler_model":"gpt-6-luna"}
+{"id":"py-0097-2","verdict":"FLAG","rules":["noise"],"evidence":["This was\nchanged after snapshots on a mounted volume were occasionally observed half"],"reason":"It recounts a prior implementation change and incident.","labeler_model":"gpt-6-luna"}
+{"id":"py-0130-2","verdict":"FLAG","rules":["noise"],"evidence":["The worker used to open a shared on-disk database file during tests"],"reason":"It includes historical test-fixture incident background.","labeler_model":"gpt-6-luna"}
+{"id":"py-0155-3","verdict":"PASS","rules":[],"evidence":[],"reason":"It states handle ownership and meaningful newline and single-pass constraints.","labeler_model":"gpt-6-luna"}
+{"id":"py-0168-3","verdict":"PASS","rules":[],"evidence":[],"reason":"It describes the decompressed-output limit and what size the cap measures.","labeler_model":"gpt-6-luna"}
+{"id":"py-0009-0","verdict":"PASS","rules":[],"evidence":[],"reason":"It names the behavior the test guards for generated files.","labeler_model":"gpt-6-luna"}
+{"id":"py-0000-0","verdict":"FLAG","rules":["narration"],"evidence":["Small JSON file cache whose entries expire after a fixed number of seconds."],"reason":"It is a generic class summary that repeats the cache's visible purpose.","labeler_model":"gpt-6-luna"}
+{"id":"py-0082-1","verdict":"FLAG","rules":["narration"],"evidence":["Empties the module-level cache before and after every test."],"reason":"It restates the fixture's name and visible setup/teardown actions.","labeler_model":"gpt-6-luna"}
+{"id":"py-0067-0","verdict":"PASS","rules":[],"evidence":[],"reason":"It states the deadline and cancellation behavior callers can rely on.","labeler_model":"gpt-6-luna"}
+{"id":"py-0017-1","verdict":"PASS","rules":[],"evidence":[],"reason":"It gives detailed symlink-resolution semantics and an exception contract.","labeler_model":"gpt-6-luna"}
+{"id":"py-0168-0","verdict":"PASS","rules":[],"evidence":[],"reason":"It describes codec selection and the shared compressed-stream behavior provided.","labeler_model":"gpt-6-luna"}
+{"id":"py-0058-2","verdict":"FLAG","rules":["noise"],"evidence":["The search index was originally built from NFD text exported by a legacy\ndesktop client"],"reason":"It includes historical index and client background.","labeler_model":"gpt-6-luna"}
+{"id":"py-0147-1","verdict":"PASS","rules":[],"evidence":[],"reason":"It states case sensitivity and batch-wide error reporting behavior.","labeler_model":"gpt-6-luna"}

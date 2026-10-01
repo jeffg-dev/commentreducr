@@ -6,51 +6,48 @@ is not a comment (strings, template literals, regex literals, JSX text, docstrin
 byte-for-byte untouched, and structural comments must be preserved. The tool has two targets:
 comments (Python, JS/TS, YAML, Rust) and Python docstrings (module, class, function).
 
-## CLI
+## CLI and selection
 
-`commentreducr comments <path> --delete|--reduce [...]` and
-`commentreducr docstrings <path> --delete|--reduce [...]` are the two subcommands; both wrap the
-same set of flags (`Config` carries a `target: Target` field set from which one was invoked).
+`reduce [path] --scope comments|docstrings|all --language python|typescript|rust|all --workers N`
+classifies every non-structural Python item and sends flagged items to the LLM. Other supported
+languages bypass the Python-only classifier and go directly to the LLM. `delete` uses the same
+scope/language selection and removes all safely editable non-structural items without inference.
+TypeScript includes TSX; all also includes JavaScript and YAML. There are no line-count, density,
+trailing-comment, or code-like gates. The `hook` Cargo feature supplies inference and SQLite;
+the basic build supports deletion and prompt eval without those dependencies.
 
-## File selection
+`install-git-hook` installs/upgrades the warning-only pre-push wrapper. `check [--warn]` checks
+changed committed Python blocks, with whole surviving blocks selected when an interior deletion
+changes them. Manual checks use upstream..HEAD. Git push stdin determines all actual pushed
+refs. Existing hooks are chained with their original arguments, stdin, and status. Checks leave
+source untouched and share the classifier cache with reduction.
 
-`files::tracked_source_files` runs `git ls-files -z` under the target path, then makes one more
-git call -- `check-ignore --no-index -z --stdin`, with `core.excludesFile` pointed at a temp file
-of the configured `ignore` patterns -- to drop any tracked file the repo's own gitignore rules
-would now match (e.g. `git add -f`'d, or ignored after it was tracked) plus anything matching
-`ignore`. A `.rs` file with a tracked sibling `.stderr` is dropped too: it is a Rust UI test
-(trybuild, ui_test, compiletest) whose expected compiler output pins line numbers, which deleting
-any comment line would shift. Config layering, `ignore` included: defaults
-(`src/default_config.toml`, embedded and parsed with the same `parse_config` at startup) -> user
-config file -> flags; list-valued keys like `ignore` concatenate default then user instead of one
-overriding the other.
+Tracked source selection and config list layering remain unchanged: Git-tracked files minus
+repo/config ignores, Rust UI snapshots skipped, defaults -> config -> flags. Scope and language
+also support config keys. Paths preserve symlinks for the planner to reject before any writes.
 
-## Pipeline (per file)
+## Reduction and durable state
 
-Comments: files::tracked_source_files -> parse::extract_comments -> parse::group_blocks
-  -> for each block: prose::analyze, structural::is_structural, policy::decide
-  -> Reduce actions: llm::LlmClient::summarize (a failure leaves the block unchanged)
-  -> rewrite::{delete_edit,reduce_edit} -> rewrite::apply -> write file
+`plan_file` reads one source snapshot and collects comment blocks and Python docstrings together,
+preserving structural items. MiniLM-L12 receives the same frozen kind/text/context pair as the
+hook. All Python targets are screened, including short and inline blocks. Oversized targets
+are errors requiring manual review. `state::Database` stores input-keyed PASS/FLAG probabilities
+and item records with file, source hash, byte/line range, kind, classification, state, disposition,
+replacement edit, and errors. Non-Python classifications are DIRECT.
 
-Docstrings: files::tracked_source_files (Python only) -> docstring::extract_docstrings
-  -> for each docstring: docstring::is_structural, then the min_lines gate (reduce mode)
-  -> Reduce actions: llm::LlmClient::rewrite_docstring (a failure leaves the docstring unchanged)
-  -> docstring::{delete_edit,replace_edit} -> rewrite::apply -> write file
+The default SQLite database is in the current worktree's Git metadata directory at
+`commentreducr/state.sqlite`; `--database` or config `database` overrides it. SQLite uses WAL
+and synchronous FULL; a file lock prevents concurrent runs on one database. Classifier keys
+include the frozen model/settings, target, and context. LLM checkpoints additionally bind the
+whole source snapshot and LLM settings. Pending/in-progress/errors retry; ready verdicts reuse.
 
-## Modes
-
-- `--reduce` (default): structural / trailing / short (< min_lines prose lines) / low-density
-  (< min_density words per line) / commented-out-code blocks are kept. Big dense prose blocks
-  are replaced by one line `{indent}{prefix} {summary}`.
-- `--delete`: every non-structural comment is removed. No LLM involved.
-- YAML comments follow the same two modes; commented-out YAML (a `#`-prefixed line that is
-  itself valid-looking YAML) is code-like and kept like commented-out code in the other
-  languages. tree-sitter-yaml is the parser; a comment is any `comment` node in its grammar.
-- Rust comments follow the same two modes. tree-sitter-rust is the parser; a comment is a
-  `line_comment` or `block_comment` node (block comments nest). Its doc comments carry a
-  doc-comment-marker child, which sets `Comment::doc`; a doc comment never groups with a plain
-  one. A line comment's range stops before its terminator: the Rust grammar includes a doc
-  comment's `\n`, and it and the Python grammar include a CRLF line's `\r`.
+Workers operate on individual flagged items, not whole files. Preflight is needed only for
+uncached LLM jobs. A file with an unresolved item is not changed; its completed verdicts remain
+ready. For a complete file, validate the edited parse, verify the original snapshot, persist a
+prepared rewrite and both hashes, then atomically replace the source and commit applied states.
+On resume, matching the before hash replays the prepared write; matching the after hash commits
+its disposition without writing again. Other source edits invalidate the file checkpoint and
+force rescan. Completed unchanged outputs are skipped for matching scope/language/model settings.
 
 ## Structural comments (always kept)
 
@@ -95,16 +92,14 @@ including a same-file subclass of one. A pattern `P` matches a dotted name `N` w
 `Signature` matches `dspy.Signature`. A user config's `keep_decorators`/`keep_bases` lists
 extend these defaults, same as `ignore`.
 
-`--delete`: `docstring::delete_edit` removes the whole lines the docstring occupies plus any
+`delete`: `docstring::delete_edit` removes the whole lines the docstring occupies plus any
 immediately-following blank lines, so the body never starts blank. A docstring that is the
 entire body of its def/class (`only_statement`) becomes `pass` instead, whatever its line shape.
 A docstring sharing a line with other code (`def g(self): """x"""; y = 1`, or anything after it
 on its own line) is left untouched — too risky to edit safely.
 
-`--reduce`: docstrings with fewer non-blank text lines than `--min-lines` are kept untouched, no
-LLM call. Everything else goes to `LlmClient::rewrite_docstring`, which replies `DELETE` or
-`KEEP` followed by replacement text; `llm::DocVerdict` carries that, and reduce mode deletes on
-`DELETE` the same way `--delete` does. The reply is capped per kind: 2 lines for a test
+`reduce`: flagged docstrings go to `LlmClient::rewrite_docstring`, which replies `DELETE` or
+`KEEP` plus replacement text. The reply is capped per kind: 2 lines for a test
 function/method, 5 for a test module/class, 15 for anything else. `docstring::replace_edit`
 preserves the original quote style and prefix and shapes multi-line text PEP 257-style (summary
 line, then indented continuation lines); a reply containing the quote sequence or a backslash is
@@ -129,29 +124,15 @@ precondition on any caller ("call flush() before close()", "caller must hold the
 contract, not a leak. The docstring prompt applies the same rule. So the model does not
 "summarize": it replies either `DELETE` or one terse line (<= max_words). `llm::Verdict` carries
 that; reduce mode deletes the block on `DELETE`. The system prompt states the rubric and sixteen
-few-shot demos (both languages, majority DELETE) are sent as prior user/assistant turns. Only blocks that pass the
-policy gate (own-line, >= min_lines prose lines, >= min_density words/line, not code-like) reach
-the model; shorter blocks are kept untouched. Reduce mode requires the LLM: `LlmClient::check`
-runs before any file is touched. There is no extractive fallback: if a call fails mid-run the
-block is left unchanged with a warning. `--dry-run` applies to `--delete` only.
+few-shot demos (both languages, majority DELETE) are sent as prior user/assistant turns.
+Only classifier-flagged Python targets and all non-Python targets reach the LLM. The prompts
+and demos are unchanged. Inline/trailing comment replacement stays inside the comment's byte
+range; own-line replacements keep their original indentation and terminators. Unsafe replies
+and parse failures leave the whole file untouched. `--dry-run` applies to `delete` only.
 
-Reduce mode runs in two passes: `plan_file` (read, parse, decide) over every file with no LLM
-to count the blocks that will be sent, then the real pass. `progress::Progress` shows percent,
-blocks, files, ETA and prompt/completion tokens with tokens/s; it redraws in place on a terminal
-and prints 10% milestones otherwise. Warnings and verbose output go through it so they never
-land inside the progress line. The final `tokens:` line includes the preflight request.
-
-## Resilience
-
-The run is best-effort after the preflight. A file that cannot be read or parsed, or whose
-processing panics (a bug), is skipped with a warning and never written. Byte offsets from
-tree-sitter are char boundaries, but derived offsets (`block.end - 1`) may not be, so the
-line-scanning helpers work on bytes. Skips and LLM failures are counted in the summary and
-make the exit status 1.
-
-`comments --eval tools/dataset/comments.jsonl` and `docstrings --eval tools/dataset/docstrings.jsonl`
-run their labeled dataset through the exact runtime prompt path and print decision accuracy,
-DELETE precision/recall, and every mismatch — use them to iterate on the prompt or demos.
+`reduce --scope comments --eval tools/dataset/comments.jsonl` and
+`reduce --scope docstrings --eval tools/dataset/docstrings.jsonl` bypass screening to measure
+the runtime LLM prompt path.
 
 ## Token budget and prefix caching
 

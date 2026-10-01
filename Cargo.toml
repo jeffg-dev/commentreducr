@@ -1,6 +1,6 @@
 [package]
 name = "commentreducr"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Strip low-value comments and docstrings from a JS/TS/Python/YAML/Rust codebase, keeping structural ones"
@@ -12,7 +12,7 @@ exclude = ["tools/", "assets/", "models/", "DESIGN.md"]
 
 [features]
 default = []
-hook = ["dep:ort", "dep:tokenizers", "dep:sha2"]
+hook = ["dep:ort", "dep:tokenizers", "dep:sha2", "dep:rusqlite"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -30,3 +30,4 @@ tree-sitter-yaml = "0.7.2"
 ort = { version = "=2.0.0-rc.11", default-features = false, features = ["std", "download-binaries", "tls-rustls"], optional = true }
 tokenizers = { version = "=0.22.2", default-features = false, features = ["fancy-regex"], optional = true }
 sha2 = { version = "0.10.9", optional = true }
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"], optional = true }

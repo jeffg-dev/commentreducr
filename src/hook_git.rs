@@ -383,9 +383,27 @@ fn source_blocks(
 /// The enclosing function/class (including its header), or a nearby module neighborhood. Large
 /// scopes retain the header and forty lines on either side; the target itself is removed.
 fn context(source: &str, tree: &tree_sitter::Tree, block: &SourceBlock) -> String {
+    context_for_range(
+        source,
+        tree,
+        block.start,
+        block.end,
+        block.start_line,
+        block.end_line,
+    )
+}
+
+pub(crate) fn context_for_range(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    start: usize,
+    end_byte: usize,
+    start_line: usize,
+    end_line: usize,
+) -> String {
     let root = tree.root_node();
     let mut scope = root;
-    let mut node = root.descendant_for_byte_range(block.start, block.end);
+    let mut node = root.descendant_for_byte_range(start, end_byte);
     while let Some(n) = node {
         if matches!(n.kind(), "function_definition" | "class_definition") {
             scope = n;
@@ -401,12 +419,12 @@ fn context(source: &str, tree: &tree_sitter::Tree, block: &SourceBlock) -> Strin
     let last = scope.end_position().row.min(offsets.len() - 2);
     let large = scope.kind() == "module" || last.saturating_sub(first) > 80;
     let from = if large {
-        (block.start_line - 1).saturating_sub(40).max(first)
+        (start_line - 1).saturating_sub(40).max(first)
     } else {
         first
     };
     let to = if large {
-        (block.end_line - 1 + 40).min(last)
+        (end_line - 1 + 40).min(last)
     } else {
         last
     };
@@ -420,8 +438,8 @@ fn context(source: &str, tree: &tree_sitter::Tree, block: &SourceBlock) -> Strin
         result.push_str(source[scope.start_byte()..body.start_byte()].trim_end());
         result.push('\n');
     }
-    result.push_str(&source[begin..block.start]);
-    result.push_str(&source[block.end..end]);
+    result.push_str(&source[begin..start]);
+    result.push_str(&source[end_byte..end]);
     result.trim().to_owned()
 }
 
@@ -589,7 +607,7 @@ pub fn changed_blocks(
     Ok(output)
 }
 
-const HOOK_HEADER: &str = "#!/bin/sh\n# commentreducr pre-push hook v1\n";
+const HOOK_HEADER: &str = "#!/bin/sh\n# commentreducr pre-push hook v2\n";
 
 fn shell_quote(path: &Path) -> Result<String> {
     let path = path
@@ -614,6 +632,7 @@ pub fn install(repo: &Path) -> Result<PathBuf> {
         .trim_end_matches('\n'),
     );
     let backup = path.with_file_name("pre-push.commentreducr-original");
+    let mut managed = false;
     let existing = match std::fs::symlink_metadata(&path) {
         Ok(meta) => {
             if !meta.is_file() || meta.file_type().is_symlink() {
@@ -622,18 +641,20 @@ pub fn install(repo: &Path) -> Result<PathBuf> {
             if std::fs::read_to_string(&path).is_ok_and(|s| s.starts_with(HOOK_HEADER)) {
                 return Ok(path);
             }
-            true
+            managed = std::fs::read_to_string(&path)
+                .is_ok_and(|s| s.starts_with("#!/bin/sh\n# commentreducr pre-push hook v1\n"));
+            !managed
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
         Err(err) => return Err(err.into()),
     };
-    if std::fs::symlink_metadata(&backup).is_ok() {
+    if std::fs::symlink_metadata(&backup).is_ok() && !managed {
         bail!(
             "existing hook backup {}; preserve or move it before installing",
             backup.display()
         );
     }
-    let original = if existing {
+    let original = if existing || (managed && backup.exists()) {
         let quoted = shell_quote(&backup)?;
         format!("if [ -x {quoted} ]; then\n    {quoted} \"$@\" < \"$input_file\" || exit $?\nfi\n")
     } else {
@@ -641,7 +662,7 @@ pub fn install(repo: &Path) -> Result<PathBuf> {
     };
     let executable = shell_quote(&std::env::current_exe()?)?;
     let script = format!(
-        "{HOOK_HEADER}input_file=$(mktemp \"${{TMPDIR:-/tmp}}/commentreducr-pre-push.XXXXXX\") || exit 1\ntrap 'rm -f \"$input_file\"' 0\ntrap 'exit 1' 1 2 3 15\ncat > \"$input_file\" || exit $?\n{original}if command -v commentreducr >/dev/null 2>&1; then\n    commentreducr prepush-check --warn \"$@\" < \"$input_file\"\nelse\n    {executable} prepush-check --warn \"$@\" < \"$input_file\"\nfi\n"
+        "{HOOK_HEADER}input_file=$(mktemp \"${{TMPDIR:-/tmp}}/commentreducr-pre-push.XXXXXX\") || exit 1\ntrap 'rm -f \"$input_file\"' 0\ntrap 'exit 1' 1 2 3 15\ncat > \"$input_file\" || exit $?\n{original}if command -v commentreducr >/dev/null 2>&1; then\n    commentreducr check --warn \"$@\" < \"$input_file\"\nelse\n    {executable} check --warn \"$@\" < \"$input_file\"\nfi\n"
     );
     let dir = path
         .parent()
@@ -997,10 +1018,24 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(repo.0.join("checker.args")).unwrap(),
-            "prepush-check\n--warn\norigin\nremote path\n"
+            "check\n--warn\norigin\nremote path\n"
         );
         std::fs::remove_file(repo.0.join("checker.stdin")).unwrap();
         assert_eq!(run("7").status.code(), Some(7));
         assert!(!repo.0.join("checker.stdin").exists());
+        let legacy = std::fs::read_to_string(&installed)
+            .unwrap()
+            .replace("pre-push hook v2", "pre-push hook v1")
+            .replace("check --warn", "prepush-check --warn");
+        std::fs::write(&installed, legacy).unwrap();
+        assert_eq!(install(&repo.0).unwrap(), installed);
+        let updated = std::fs::read_to_string(&installed).unwrap();
+        assert!(updated.starts_with(HOOK_HEADER));
+        assert!(!updated.contains("prepush-check"));
+        assert!(run("0").status.success());
+        assert_eq!(
+            std::fs::read_to_string(hooks.join("pre-push.commentreducr-original")).unwrap(),
+            original
+        );
     }
 }

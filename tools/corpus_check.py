@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run --delete over a corpus and prove nothing but comments/docstrings changed.
+"""Run delete over a corpus and prove nothing but comments/docstrings changed.
 
     tools/corpus_check.py [--bin PATH] [--target comments|docstrings|both] DIR...
 
@@ -121,7 +121,7 @@ def rust_tokens(src):
 
 
 def run_target(binary, repo, target):
-    proc = subprocess.run([binary, target, repo, "--delete"], capture_output=True, text=True)
+    proc = subprocess.run([binary, "delete", repo, "--scope", target], capture_output=True, text=True)
     skipped = [l for l in proc.stderr.splitlines() if l.startswith("warning: skipping")]
     summary = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else ""
     changed = git(repo, "diff", "--name-only").split()

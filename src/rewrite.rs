@@ -138,6 +138,16 @@ pub fn delete_edit(src: &str, block: &CommentBlock) -> Edit {
 /// Edit that replaces an own-line block with `{indent}{prefix} {summary}` plus the file's line
 /// terminator (CRLF preserved).
 pub fn reduce_edit(src: &str, block: &CommentBlock, lang: Language, summary: &str) -> Edit {
+    if !block.own_line || block.code_after {
+        return Edit {
+            start: block.start,
+            end: block.end,
+            replacement: match block.kind {
+                crate::types::CommentKind::Line => format!("{} {summary}", lang.line_prefix()),
+                crate::types::CommentKind::Block => format!("/* {summary} */"),
+            },
+        };
+    }
     let start = block.start - block.indent.len();
     let last_pos = block.end.saturating_sub(1).max(block.start);
     let last_line_end_with_term = line_end_incl_terminator(src, last_pos);
@@ -297,5 +307,25 @@ mod tests {
         let edit = reduce_edit(src, &b, Language::JavaScript, "does the thing");
         let out = apply(src, vec![edit]);
         assert_eq!(out, "fn f() {\n    // does the thing\n    do_thing();\n}\n");
+    }
+
+    #[test]
+    fn reducing_inline_and_trailing_comments_preserves_adjacent_code() {
+        let src = "return/* verbose remark */undefined; // trailing remark\n";
+        let start = src.find("/*").unwrap();
+        let end = src.find("*/").unwrap() + 2;
+        let trailing = src.find("//").unwrap();
+        let mut inline = block(src, start, end, false, true);
+        inline.kind = CommentKind::Block;
+        let edits = vec![
+            reduce_edit(src, &inline, Language::JavaScript, "trap"),
+            reduce_edit(
+                src,
+                &block(src, trailing, src.len() - 1, false, false),
+                Language::JavaScript,
+                "reason",
+            ),
+        ];
+        assert_eq!(apply(src, edits), "return/* trap */undefined; // reason\n");
     }
 }

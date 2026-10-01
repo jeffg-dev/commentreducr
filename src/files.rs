@@ -67,9 +67,6 @@ pub fn tracked_source_files(root: &Path, ignore: &[String]) -> Result<Vec<(PathB
         let path = Path::new(rel);
         if let Some(lang) = Language::from_path(path) {
             let full = dir_canon.join(path);
-            let full = full
-                .canonicalize()
-                .with_context(|| format!("failed to canonicalize {}", full.display()))?;
             files.push((full, lang));
         }
     }

@@ -1,16 +1,10 @@
 //! End-to-end CLI tests over tests/fixtures without a live LLM.
 //!
-//! `comments` subcommand: --delete (correct and idempotent), --delete --dry-run (counts, writes
-//! nothing), and --reduce against a dead endpoint (hard failure, writes nothing).
-//!
-//! `docstrings` subcommand: same shape, against tests/fixtures/test_sample.py (plus sample.py,
-//! which is a Python file but not part of the docstrings test's own fixture set).
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+//! Covers deletion safety, idempotence, dry runs, scope/language filters, and configuration.
+//! Classifier-assisted reduction and interruption recovery are exercised in reduce.rs.
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 /// Minimal RAII temp directory: a unique path under the system temp dir, created eagerly and
 /// removed (best-effort) on drop. Stands in for `tempfile::TempDir` without the dependency.
@@ -259,78 +253,6 @@ fn setup_docstrings_repo() -> TempDir {
     dir
 }
 
-/// A temp repo with exactly tests/fixtures/test_sample.py, sample.py and sample.ts, for the
-/// reduce-mode end-to-end test below (kept small so the mock LLM's expected request count is
-/// exact and easy to reason about).
-fn setup_reduce_repo() -> TempDir {
-    let dir = TempDir::new();
-    let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    for name in ["test_sample.py", "sample.py", "sample.ts"] {
-        std::fs::copy(fixtures_dir.join(name), dir.path().join(name)).unwrap();
-    }
-    commit_all(dir.path());
-    dir
-}
-
-/// Reads one HTTP request off `stream`: headers up to the blank line, then exactly
-/// Content-Length bytes of body. Good enough for the loopback, synchronous requests our own
-/// `minreq`-based client makes; not a general HTTP parser.
-fn read_http_body(stream: &TcpStream) -> String {
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-            break;
-        }
-        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-            content_length = v.trim().parse().unwrap_or(0);
-        }
-    }
-    let mut body = vec![0u8; content_length];
-    reader.read_exact(&mut body).unwrap();
-    String::from_utf8_lossy(&body).into_owned()
-}
-
-/// A tiny in-process mock of an OpenAI-compatible `/v1/chat/completions` endpoint. Accepts up to
-/// `expected_requests` connections (then the accept loop -- and with it the listener -- ends, so
-/// nothing can hang the test), and for each one answers with the reply from the first `rules`
-/// entry whose marker is a substring of the request body, or `default_reply` otherwise. Returns
-/// the endpoint base URL.
-fn mock_llm(
-    rules: Vec<(&'static str, String)>,
-    default_reply: String,
-    expected_requests: u32,
-) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        for _ in 0..expected_requests {
-            let Ok((mut stream, _)) = listener.accept() else {
-                return;
-            };
-            stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
-            stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
-            let body = read_http_body(&stream);
-            let reply = rules
-                .iter()
-                .find(|(marker, _)| body.contains(marker))
-                .map_or_else(|| default_reply.clone(), |(_, r)| r.clone());
-            let payload = serde_json::json!({
-                "choices": [{"message": {"content": reply}}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 2},
-            })
-            .to_string();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
-                payload.len(),
-            );
-            let _ = stream.write_all(response.as_bytes());
-        }
-    });
-    format!("http://127.0.0.1:{port}/v1")
-}
-
 fn setup_repo_uncommitted() -> TempDir {
     let dir = TempDir::new();
     let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
@@ -357,9 +279,9 @@ fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
     let dir = setup_repo();
 
     run(commentreducr()
-        .arg("comments")
-        .arg(dir.path())
-        .arg("--delete"))
+        .arg("delete")
+        .args(["--scope", "comments"])
+        .arg(dir.path()))
     .success();
 
     for f in FIXTURES {
@@ -384,12 +306,12 @@ fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
         );
     }
 
-    // Idempotent: running --delete again changes nothing.
+    // Idempotent: running delete again changes nothing.
     let before: Vec<String> = FIXTURES.iter().map(|f| read(dir.path(), f.name)).collect();
     run(commentreducr()
-        .arg("comments")
-        .arg(dir.path())
-        .arg("--delete"))
+        .arg("delete")
+        .args(["--scope", "comments"])
+        .arg(dir.path()))
     .success();
     for (f, before) in FIXTURES.iter().zip(before) {
         assert_eq!(
@@ -401,15 +323,15 @@ fn delete_mode_removes_non_structural_comments_and_is_idempotent() {
     }
 }
 
-/// sample.rs after `--delete` still compiles, and its `#![deny(missing_docs)]` makes rustc
+/// sample.rs after `delete` still compiles, and its `#![deny(missing_docs)]` makes rustc
 /// itself confirm that every doc comment survived.
 #[test]
 fn rust_delete_output_still_compiles() {
     let dir = setup_repo();
     run(commentreducr()
-        .arg("comments")
-        .arg(dir.path())
-        .arg("--delete"))
+        .arg("delete")
+        .args(["--scope", "comments"])
+        .arg(dir.path()))
     .success();
 
     let after = read(dir.path(), "sample.rs");
@@ -445,9 +367,9 @@ fn delete_dry_run_counts_but_writes_nothing() {
     let before = snapshot(dir.path());
 
     run(commentreducr()
-        .arg("comments")
+        .arg("delete")
+        .args(["--scope", "comments"])
         .arg(dir.path())
-        .arg("--delete")
         .arg("--dry-run"))
     .success()
     .stdout_contains(" deleted (")
@@ -467,9 +389,9 @@ fn broken_file_is_skipped_and_others_still_processed() {
         .unwrap();
 
     run(commentreducr()
-        .arg("comments")
-        .arg(dir.path())
-        .arg("--delete"))
+        .arg("delete")
+        .args(["--scope", "comments"])
+        .arg(dir.path()))
     .code(1)
     .stderr_contains("warning: skipping")
     .stderr_contains("7 files scanned, 6 changed, 1 skipped");
@@ -487,52 +409,31 @@ fn broken_file_is_skipped_and_others_still_processed() {
 fn dry_run_requires_delete() {
     let dir = setup_repo();
     run(commentreducr()
-        .arg("comments")
+        .arg("reduce")
+        .args(["--scope", "comments"])
         .arg(dir.path())
         .arg("--dry-run"))
     .failure()
-    .stderr_contains("--delete");
+    .stderr_contains("--dry-run only applies to delete");
 }
 
 #[test]
 fn dry_run_with_explicit_reduce_is_also_rejected() {
-    // clap's `requires = "delete"` on --dry-run does not fire against an explicit --reduce (only
-    // against --reduce's absence), so this combination must be checked by hand -- otherwise it
-    // would run the full reduce pipeline, including live LLM calls, before being silently
-    // no-op'd at the final write.
+    // Reject before inference or writes, even when an endpoint is explicitly configured.
     let dir = setup_repo();
     let before = snapshot(dir.path());
 
     run(commentreducr()
-        .arg("comments")
+        .arg("reduce")
+        .args(["--scope", "comments"])
         .arg(dir.path())
-        .arg("--reduce")
         .arg("--dry-run")
         .arg("--endpoint")
         .arg("http://127.0.0.1:1/v1"))
     .failure()
-    .stderr_contains("--dry-run only applies to --delete");
+    .stderr_contains("--dry-run only applies to delete");
 
     assert_eq!(snapshot(dir.path()), before, "rejected run modified files");
-}
-
-#[test]
-fn reduce_fails_hard_when_llm_unreachable() {
-    let dir = setup_repo();
-    let before = snapshot(dir.path());
-
-    run(commentreducr()
-        .arg("comments")
-        .arg(dir.path())
-        .arg("--reduce")
-        .arg("--config")
-        .arg(dir.path().join("no-such-config.toml"))
-        .arg("--endpoint")
-        .arg("http://127.0.0.1:1/v1"))
-    .failure()
-    .stderr_contains("cannot reach LLM at http://127.0.0.1:1/v1");
-
-    assert_eq!(snapshot(dir.path()), before, "failed reduce modified files");
 }
 
 #[test]
@@ -549,9 +450,9 @@ fn docstrings_delete_removes_docstrings_and_is_idempotent() {
     let dir = setup_docstrings_repo();
 
     run(commentreducr()
-        .arg("docstrings")
-        .arg(dir.path())
-        .arg("--delete"))
+        .arg("delete")
+        .args(["--scope", "docstrings"])
+        .arg(dir.path()))
     .success()
     .stderr_contains("docstrings:")
     .stderr_contains("2 files scanned");
@@ -637,15 +538,15 @@ fn docstrings_delete_removes_docstrings_and_is_idempotent() {
         "sample.py's non-structural module docstring should be gone"
     );
 
-    // Idempotent: running docstrings --delete again changes nothing.
+    // Idempotent: running delete --scope docstrings again changes nothing.
     let before = (
         read(dir.path(), "test_sample.py"),
         read(dir.path(), "sample.py"),
     );
     run(commentreducr()
-        .arg("docstrings")
-        .arg(dir.path())
-        .arg("--delete"))
+        .arg("delete")
+        .args(["--scope", "docstrings"])
+        .arg(dir.path()))
     .success();
     assert_eq!(
         read(dir.path(), "test_sample.py"),
@@ -665,9 +566,9 @@ fn docstrings_delete_dry_run_prints_and_writes_nothing() {
     let before = read(dir.path(), "test_sample.py");
 
     run(commentreducr()
-        .arg("docstrings")
+        .arg("delete")
+        .args(["--scope", "docstrings"])
         .arg(dir.path())
-        .arg("--delete")
         .arg("--dry-run"))
     .success()
     .stdout_contains("test_sample.py: ")
@@ -681,37 +582,14 @@ fn docstrings_delete_dry_run_prints_and_writes_nothing() {
 }
 
 #[test]
-fn docstrings_reduce_fails_hard_when_llm_unreachable() {
-    let dir = setup_docstrings_repo();
-    let before = read(dir.path(), "test_sample.py");
-
-    run(commentreducr()
-        .arg("docstrings")
-        .arg(dir.path())
-        .arg("--reduce")
-        .arg("--config")
-        .arg(dir.path().join("no-such-config.toml"))
-        .arg("--endpoint")
-        .arg("http://127.0.0.1:1/v1"))
-    .failure()
-    .stderr_contains("cannot reach LLM at http://127.0.0.1:1/v1");
-
-    assert_eq!(
-        read(dir.path(), "test_sample.py"),
-        before,
-        "failed reduce modified files"
-    );
-}
-
-#[test]
 fn comments_delete_leaves_docstrings_in_test_sample_intact() {
     let dir = setup_docstrings_repo();
     let before = read(dir.path(), "test_sample.py");
 
     run(commentreducr()
-        .arg("comments")
-        .arg(dir.path())
-        .arg("--delete"))
+        .arg("delete")
+        .args(["--scope", "comments"])
+        .arg(dir.path()))
     .success();
 
     let after = read(dir.path(), "test_sample.py");
@@ -725,7 +603,7 @@ fn comments_delete_leaves_docstrings_in_test_sample_intact() {
     ] {
         assert!(
             after.contains(survives),
-            "comments --delete touched a docstring: lost {survives:?}"
+            "delete --scope comments touched a docstring: lost {survives:?}"
         );
     }
     // The plain `# comment` line, on the other hand, is a non-structural comment and is exactly
@@ -733,142 +611,7 @@ fn comments_delete_leaves_docstrings_in_test_sample_intact() {
     assert!(!after.contains("# comment"), "{after}");
     assert_ne!(
         before, after,
-        "comments --delete should have removed # comment"
-    );
-}
-
-/// End-to-end reduce mode, against an in-process mock LLM instead of a live one: `docstrings
-/// --reduce` over a small repo (module docstring KEEP+3 lines, a test function KEEP+1 line, a
-/// helper DELETE, and a KEEP containing `"""` that must be refused as unsafe), then `comments
-/// --reduce` over the same repo (a K-class keep and a D-class delete).
-#[test]
-fn reduce_mode_end_to_end_with_a_mock_llm() {
-    let dir = setup_reduce_repo();
-    let no_config = dir.path().join("no-such-config.toml");
-
-    let endpoint = mock_llm(
-        vec![
-            (
-                "Q3 test-infra cleanup",
-                "KEEP\nShared pytest helpers for this package.\nKeep new tests colocated here.\nSee wiki for conventions.".to_string(),
-            ),
-            ("Normalizes a list of items", "DELETE".to_string()),
-            (
-                "Guards the empty-list case",
-                "KEEP\nGuards the empty case, nothing else.".to_string(),
-            ),
-            (
-                "mixed-case, whitespace-padded items",
-                "KEEP\nSays \"\"\" here by mistake.".to_string(),
-            ),
-        ],
-        "DELETE".to_string(),
-        8, // preflight + {module, helper_thing, test_short, test_dedup, TestThing, probe} + sample.py's module
-    );
-
-    run(commentreducr()
-        .arg("docstrings")
-        .arg(dir.path())
-        .arg("--reduce")
-        .arg("--min-lines")
-        .arg("1")
-        .arg("-n")
-        .arg("1")
-        .arg("--endpoint")
-        .arg(&endpoint)
-        .arg("--config")
-        .arg(&no_config))
-    .code(1)
-    .stderr_contains("2 files scanned, 2 changed, 0 skipped")
-    .stderr_contains("docstrings: 2 kept, 4 deleted (")
-    .stderr_contains("lines), 2 reduced (")
-    .stderr_contains("lines saved), 1 LLM failures");
-
-    let test_sample = read(dir.path(), "test_sample.py");
-    // Module docstring: own_line, indent "" -- KEEP text spliced in with PEP 257 closing quotes
-    // on their own line.
-    assert!(
-        test_sample.contains(
-            "\"\"\"Shared pytest helpers for this package.\nKeep new tests colocated here.\nSee wiki for conventions.\n\"\"\""
-        ),
-        "module docstring not rewritten as expected:\n{test_sample}"
-    );
-    // helper_thing: DELETE removes the whole docstring.
-    assert!(
-        !test_sample.contains("Normalizes a list of items"),
-        "helper_thing docstring not deleted:\n{test_sample}"
-    );
-    // test_short: single-line KEEP at its original 4-space indent.
-    assert!(
-        test_sample.contains("    \"\"\"Guards the empty case, nothing else.\"\"\""),
-        "test_short docstring not rewritten as expected:\n{test_sample}"
-    );
-    // test_dedup_and_lowercase: the KEEP reply contains the quote delimiter, so replace_edit
-    // refuses it as unsafe -- the docstring is left byte-for-byte unchanged.
-    assert!(
-        test_sample.contains("Ensures mixed-case, whitespace-padded items are normalized"),
-        "test_dedup docstring should survive a refused reply unchanged:\n{test_sample}"
-    );
-    // TestThing and Widget.probe: DELETE on an only_statement docstring becomes `pass`.
-    assert!(
-        test_sample.contains("class TestThing:\n    pass\n"),
-        "TestThing docstring not deleted:\n{test_sample}"
-    );
-    assert!(
-        test_sample.contains("def probe(self): pass"),
-        "Widget.probe docstring not deleted:\n{test_sample}"
-    );
-    // The rewritten file must still parse cleanly.
-    let mut parser = tree_sitter::Parser::new();
-    parser
-        .set_language(&tree_sitter_python::LANGUAGE.into())
-        .unwrap();
-    let tree = parser.parse(test_sample.as_bytes(), None).unwrap();
-    assert!(
-        !tree.root_node().has_error(),
-        "rewritten test_sample.py has parse errors:\n{test_sample}"
-    );
-
-    let sample_py = read(dir.path(), "sample.py");
-    assert!(
-        !sample_py.contains("Module docstring: a small stats helper"),
-        "sample.py's module docstring should have been deleted:\n{sample_py}"
-    );
-
-    // --- comments --reduce, same repo ---
-    let endpoint = mock_llm(
-        vec![
-            ("pulling in numpy", "K1 keep this trap".to_string()),
-            ("pulling in a math library", "D1".to_string()),
-        ],
-        "DELETE".to_string(),
-        3, // preflight + sample.py's block + sample.ts's block
-    );
-
-    run(commentreducr()
-        .arg("comments")
-        .arg(dir.path())
-        .arg("--reduce")
-        .arg("--min-lines")
-        .arg("1")
-        .arg("-n")
-        .arg("1")
-        .arg("--endpoint")
-        .arg(&endpoint)
-        .arg("--config")
-        .arg(&no_config))
-    .success()
-    .stderr_contains("tokens: 3 requests,");
-
-    let sample_py = read(dir.path(), "sample.py");
-    assert!(
-        sample_py.contains("    # keep this trap\n"),
-        "sample.py's big block not reduced to the K1 reply:\n{sample_py}"
-    );
-    let sample_ts = read(dir.path(), "sample.ts");
-    assert!(
-        !sample_ts.contains("walks the list of samples"),
-        "sample.ts's big block not deleted:\n{sample_ts}"
+        "delete --scope comments should have removed # comment"
     );
 }
 
@@ -888,9 +631,9 @@ fn ignore_skips_default_migrations_and_user_configured_patterns() {
     // No user config: the shipped default `ignore = ["migrations/"]` alone skips
     // migrations/foo.py, so only keep.py is scanned and changed.
     run(commentreducr()
-        .arg("comments")
+        .arg("delete")
+        .args(["--scope", "comments"])
         .arg(dir.path())
-        .arg("--delete")
         .arg("--config")
         .arg(dir.path().join("no-such-config.toml")))
     .success()
@@ -931,9 +674,9 @@ fn ignore_skips_default_migrations_and_user_configured_patterns() {
     let config_path = dir.path().join("config.toml");
     std::fs::write(&config_path, "ignore = [\"legacy/\"]\n").unwrap();
     run(commentreducr()
-        .arg("comments")
+        .arg("delete")
+        .args(["--scope", "comments"])
         .arg(dir.path())
-        .arg("--delete")
         .arg("--config")
         .arg(&config_path))
     .success()
@@ -956,7 +699,7 @@ fn ignore_skips_default_migrations_and_user_configured_patterns() {
 }
 
 /// A `@tool`-decorated function (Strands), a `dspy.Signature` subclass, and a `BaseModel`
-/// subclass all have their docstrings sent to an LLM at runtime -- `--delete` must leave them
+/// subclass all have their docstrings sent to an LLM at runtime -- `delete` must leave them
 /// byte-for-byte untouched, unlike a plain function's docstring in the same file.
 #[test]
 fn docstrings_delete_keeps_agentic_docstrings() {
@@ -993,9 +736,9 @@ def helper(x):
     commit_all(dir.path());
 
     run(commentreducr()
-        .arg("docstrings")
+        .arg("delete")
+        .args(["--scope", "docstrings"])
         .arg(dir.path())
-        .arg("--delete")
         .arg("--config")
         .arg(dir.path().join("no-such-config.toml")))
     .success();
@@ -1039,9 +782,9 @@ def sample_data():
     std::fs::write(dir.path().join("fixtures.py"), src).unwrap();
     commit_all(dir.path());
     run(commentreducr()
-        .arg("docstrings")
+        .arg("delete")
+        .args(["--scope", "docstrings"])
         .arg(dir.path())
-        .arg("--delete")
         .arg("--config")
         .arg(dir.path().join("no-such-config.toml")))
     .success();
@@ -1056,9 +799,9 @@ def sample_data():
     let config_path = dir.path().join("config.toml");
     std::fs::write(&config_path, "keep_decorators = [\"fixture\"]\n").unwrap();
     run(commentreducr()
-        .arg("docstrings")
+        .arg("delete")
+        .args(["--scope", "docstrings"])
         .arg(dir.path())
-        .arg("--delete")
         .arg("--config")
         .arg(&config_path))
     .success();
@@ -1067,4 +810,63 @@ def sample_data():
             .contains("Provides the sample data every test in this module reuses."),
         "fixture docstring should survive with keep_decorators = [\"fixture\"] in the config"
     );
+}
+
+#[test]
+fn language_and_scope_filters_combine_and_flags_override_config() {
+    let dir = TempDir::new();
+    let python = "\"\"\"Narration.\"\"\"\n# Narration.\ndef f():\n    \"\"\"Return a constant.\"\"\"\n    # Read the constant.\n    return 1\n";
+    for (name, source) in [
+        ("item.py", python),
+        ("item.ts", "// narration\nconst a = 1;\n"),
+        ("item.tsx", "// narration\nconst a = <div/>;\n"),
+        ("item.js", "// narration\nconst a = 1;\n"),
+        ("item.rs", "// narration\nfn f() {}\n"),
+    ] {
+        std::fs::write(dir.path().join(name), source).unwrap();
+    }
+    commit_all(dir.path());
+    run(commentreducr().arg("delete").arg(dir.path()).args([
+        "--scope",
+        "all",
+        "--language",
+        "typescript",
+    ]))
+    .success()
+    .stderr_contains("2 files scanned, 2 changed");
+    assert_eq!(read(dir.path(), "item.py"), python);
+    assert_eq!(read(dir.path(), "item.ts"), "const a = 1;\n");
+    assert_eq!(read(dir.path(), "item.tsx"), "const a = <div/>;\n");
+    assert!(read(dir.path(), "item.js").starts_with("// narration"));
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, "scope = \"docstrings\"\nlanguage = \"python\"\n").unwrap();
+    run(commentreducr()
+        .arg("delete")
+        .arg(dir.path())
+        .arg("--config")
+        .arg(&config)
+        .args(["--scope", "comments", "--language", "rust"]))
+    .success()
+    .stderr_contains("1 files scanned, 1 changed");
+    assert_eq!(read(dir.path(), "item.py"), python);
+    assert_eq!(read(dir.path(), "item.rs"), "fn f() {}\n");
+    run(commentreducr().arg("delete").arg(dir.path()).args([
+        "--scope",
+        "all",
+        "--language",
+        "python",
+    ]))
+    .success();
+    assert_eq!(read(dir.path(), "item.py"), "def f():\n    return 1\n");
+}
+
+#[cfg(not(feature = "hook"))]
+#[test]
+fn reduce_without_optional_feature_explains_install_and_leaves_files_intact() {
+    let dir = setup_repo();
+    let before = snapshot(dir.path());
+    run(commentreducr().arg("reduce").arg(dir.path()))
+        .failure()
+        .stderr_contains("cargo install commentreducr --features hook");
+    assert_eq!(snapshot(dir.path()), before);
 }

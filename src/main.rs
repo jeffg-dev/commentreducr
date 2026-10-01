@@ -1,18 +1,15 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use commentreducr::{Config, Mode, Target, run};
+use commentreducr::{Config, Languages, Mode, Target, run};
 use std::path::{Path, PathBuf};
 
-/// Every default the CLI ships with, in the same flat `key = value` grammar `parse_config`
-/// reads a user's config file with; see the README config section. `[default: N]` in the clap
-/// help strings below are literal copies of these values, checked against them by
-/// `embedded_defaults_match_help_text`.
+/// Shipped defaults use the same configuration parser as the user's file.
 const DEFAULT_CONFIG_TOML: &str = include_str!("default_config.toml");
 
 const AFTER_HELP: &str =
     "Advanced options: --help. Settings file: ~/.config/commentreducr/config.toml";
-const AFTER_LONG_HELP: &str = "endpoint, model, docstrings_model, api_key, workers, min_lines, \
-                               min_density, max_words, ignore, keep_decorators and keep_bases \
+const AFTER_LONG_HELP: &str = "endpoint, model, docstrings_model, api_key, workers, scope, language, database, \
+                               max_words, ignore, keep_decorators and keep_bases \
                                can also be set in ~/.config/commentreducr/config.toml; flags \
                                win.";
 
@@ -26,18 +23,18 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Comments in Python, JS/TS, YAML and Rust files
+    /// Screen all non-structural items, then reduce or delete flagged items with the LLM
     #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
-    Comments(Opts),
-    /// Python docstrings (module, class, function)
+    Reduce(Opts),
+    /// Delete all non-structural items without a classifier or LLM
     #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
-    Docstrings(Opts),
-    /// Install a warning-only pre-push hook and prepare the local Python classifier
+    Delete(Opts),
+    /// Install a warning-only pre-push hook and prepare the local classifier
     #[cfg(feature = "hook")]
-    InstallHook,
-    /// Check changed Python comments and docstrings in commits being pushed
+    InstallGitHook,
+    /// Check changed Python documentation in commits being pushed
     #[cfg(feature = "hook")]
-    PrepushCheck(HookOpts),
+    Check(HookOpts),
 }
 
 #[cfg(feature = "hook")]
@@ -49,6 +46,9 @@ struct HookOpts {
     /// Config file for ignore patterns and structural docstring exemptions
     #[arg(long, value_name = "FILE", default_value_os_t = default_config_path(), hide_default_value = true)]
     config: PathBuf,
+    /// SQLite classifier cache [default: Git metadata directory/commentreducr/state.sqlite]
+    #[arg(long, value_name = "FILE")]
+    database: Option<PathBuf>,
     #[arg(hide = true)]
     remote_name: Option<String>,
     #[arg(hide = true, requires = "remote_name")]
@@ -64,7 +64,7 @@ fn install_hook() -> Result<()> {
         .output()?;
     anyhow::ensure!(
         status.status.success(),
-        "run install-hook inside a Git repository"
+        "run install-git-hook inside a Git repository"
     );
     commentreducr::hook_model::install_model()?;
     let path = commentreducr::hook_git::install(&directory)?;
@@ -94,12 +94,30 @@ fn prepush_check(opts: &HookOpts) -> Result<()> {
             println!("commentreducr: no changed Python documentation blocks.");
             return Ok(false);
         }
-        let mut classifier = commentreducr::hook_model::Classifier::load()?;
+        let database = commentreducr::state::Database::open(
+            &std::env::current_dir()?,
+            opts.database.as_deref().or(file.database.as_deref()),
+        )?;
+        let mut classifier = None;
         let mut findings = 0;
         let mut errors = 0;
         for block in &blocks {
-            match classifier.probability(&block.kind, &block.text, &block.context) {
-                Ok(score) if score >= classifier.threshold() => {
+            let verdict = (|| -> Result<bool> {
+                let key =
+                    commentreducr::state::classifier_key(&block.kind, &block.text, &block.context);
+                if let Some((flag, _)) = database.classification(&key)? {
+                    return Ok(flag);
+                }
+                if classifier.is_none() {
+                    classifier = Some(commentreducr::hook_model::Classifier::load()?);
+                }
+                let classifier = classifier.as_mut().unwrap();
+                let probability =
+                    classifier.probability(&block.kind, &block.text, &block.context)?;
+                database.remember_classification(&key, probability, classifier.threshold())
+            })();
+            match verdict {
+                Ok(true) => {
                     findings += 1;
                     let advice = if block.kind == "comment" {
                         "Keep only an unexpected reason, a non-obvious trap, or a shortcut through complex code."
@@ -151,17 +169,21 @@ struct Opts {
     /// Directory or file to process [default: .]
     path: Option<PathBuf>,
 
-    /// Delete all non-structural comments/docstrings.
+    /// Items to process [default: all]
+    #[arg(long, value_enum)]
+    scope: Option<Target>,
+
+    /// Languages to process [default: all]; typescript includes TSX
+    #[arg(long, value_enum)]
+    language: Option<Languages>,
+
+    /// With delete only: report changes without writing
     #[arg(long)]
-    delete: bool,
-
-    /// Reduce large dense blocks to one line/short text via the LLM (default).
-    #[arg(long, conflicts_with = "delete")]
-    reduce: bool,
-
-    /// With --delete only: report what would change without writing.
-    #[arg(long, requires = "delete")]
     dry_run: bool,
+
+    /// SQLite state file [default: Git metadata directory/commentreducr/state.sqlite]
+    #[arg(long, value_name = "FILE")]
+    database: Option<PathBuf>,
 
     /// Worker threads (and max in-flight LLM requests) [default: 8]
     #[arg(short = 'n', long, alias = "concurrency", value_name = "N")]
@@ -196,24 +218,6 @@ struct Opts {
     /// API key, if the endpoint needs one
     #[arg(long, help_heading = "LLM")]
     api_key: Option<String>,
-
-    /// Minimum lines in a block before it is reduced [default: 4]
-    #[arg(
-        long,
-        value_name = "N",
-        help_heading = "Advanced",
-        hide_short_help = true
-    )]
-    min_lines: Option<usize>,
-
-    /// (comments only) Minimum average words per line [default: 5]
-    #[arg(
-        long,
-        value_name = "N",
-        help_heading = "Advanced",
-        hide_short_help = true
-    )]
-    min_density: Option<f64>,
 
     /// (comments only) Target max words in a summary [default: 20]
     #[arg(
@@ -251,12 +255,13 @@ struct Opts {
 struct FileConfig {
     endpoint: Option<String>,
     model: Option<String>,
-    /// Model for the docstrings subcommand; falls back to `model`, then the built-in default.
+    /// Docstring LLM model; falls back to `model`, then the built-in default.
     docstrings_model: Option<String>,
     api_key: Option<String>,
     workers: Option<usize>,
-    min_lines: Option<usize>,
-    min_density: Option<f64>,
+    scope: Option<Target>,
+    database: Option<PathBuf>,
+    language: Option<Languages>,
     max_words: Option<usize>,
     /// gitignore-syntax patterns; merged with the shipped default by `merge_list`, not replacing
     /// it (see `assign_config_value`'s doc comment).
@@ -416,14 +421,6 @@ fn assign_config_value(
             _ => anyhow::bail!("line {lineno}: {key} expects a number"),
         }
     }
-    fn as_f64(key: &str, value: ConfigValue, lineno: usize) -> Result<f64> {
-        match value {
-            ConfigValue::Num(n) => n
-                .parse()
-                .map_err(|_| anyhow::anyhow!("line {lineno}: {key} expects a number")),
-            _ => anyhow::bail!("line {lineno}: {key} expects a number"),
-        }
-    }
     fn as_list(key: &str, value: ConfigValue, lineno: usize) -> Result<Vec<String>> {
         match value {
             ConfigValue::List(items) => Ok(items),
@@ -436,9 +433,27 @@ fn assign_config_value(
         "docstrings_model" => cfg.docstrings_model = Some(as_str(key, value, lineno)?),
         "api_key" => cfg.api_key = Some(as_str(key, value, lineno)?),
         "workers" => cfg.workers = Some(as_usize(key, value, lineno)?),
-        "min_lines" => cfg.min_lines = Some(as_usize(key, value, lineno)?),
+        "scope" => {
+            let s = as_str(key, value, lineno)?;
+            cfg.scope = Some(match s.as_str() {
+                "comments" => Target::Comments,
+                "docstrings" => Target::Docstrings,
+                "all" => Target::All,
+                _ => anyhow::bail!("line {lineno}: invalid scope"),
+            });
+        }
+        "database" => cfg.database = Some(PathBuf::from(as_str(key, value, lineno)?)),
+        "language" => {
+            let s = as_str(key, value, lineno)?;
+            cfg.language = Some(match s.as_str() {
+                "python" => Languages::Python,
+                "typescript" => Languages::TypeScript,
+                "rust" => Languages::Rust,
+                "all" => Languages::All,
+                _ => anyhow::bail!("line {lineno}: invalid language"),
+            });
+        }
         "max_words" => cfg.max_words = Some(as_usize(key, value, lineno)?),
-        "min_density" => cfg.min_density = Some(as_f64(key, value, lineno)?),
         "ignore" => cfg.ignore = Some(as_list(key, value, lineno)?),
         "keep_decorators" => cfg.keep_decorators = Some(as_list(key, value, lineno)?),
         "keep_bases" => cfg.keep_bases = Some(as_list(key, value, lineno)?),
@@ -466,8 +481,8 @@ struct Defaults {
     model: String,
     docstrings_model: String,
     workers: usize,
-    min_lines: usize,
-    min_density: f64,
+    scope: Target,
+    language: Languages,
     max_words: usize,
     ignore: Vec<String>,
     keep_decorators: Vec<String>,
@@ -487,12 +502,10 @@ fn embedded_defaults() -> Defaults {
         workers: cfg
             .workers
             .expect("src/default_config.toml: missing `workers`"),
-        min_lines: cfg
-            .min_lines
-            .expect("src/default_config.toml: missing `min_lines`"),
-        min_density: cfg
-            .min_density
-            .expect("src/default_config.toml: missing `min_density`"),
+        scope: cfg.scope.expect("src/default_config.toml: missing `scope`"),
+        language: cfg
+            .language
+            .expect("src/default_config.toml: missing `language`"),
         max_words: cfg
             .max_words
             .expect("src/default_config.toml: missing `max_words`"),
@@ -527,41 +540,37 @@ fn load_file_config(path: &Path) -> Result<FileConfig> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    // Panics inside a worker are caught and reported as warnings; keep the default hook quiet.
     std::panic::set_hook(Box::new(|_| {}));
-    let (target, opts) = match &cli.command {
-        Command::Comments(o) => (Target::Comments, o),
-        Command::Docstrings(o) => (Target::Docstrings, o),
+    let (mode, opts) = match &cli.command {
+        Command::Reduce(o) => (Mode::Reduce, o),
+        Command::Delete(o) => (Mode::Delete, o),
         #[cfg(feature = "hook")]
-        Command::InstallHook => return install_hook(),
+        Command::InstallGitHook => return install_hook(),
         #[cfg(feature = "hook")]
-        Command::PrepushCheck(opts) => return prepush_check(opts),
+        Command::Check(opts) => return prepush_check(opts),
     };
-    // clap's `requires = "delete"` on --dry-run only fires against the arguments actually typed,
-    // so `--reduce --dry-run` (an explicit --reduce, rather than --reduce's absence) sails past
-    // it and would otherwise run the full reduce pipeline -- including live LLM calls -- with
-    // only the final write suppressed. Reduce mode does not support dry-run at all; check the
-    // resolved flag instead of trusting clap to have rejected every shape of this combination.
-    if opts.dry_run && !opts.delete {
-        anyhow::bail!("--dry-run only applies to --delete");
-    }
+    anyhow::ensure!(
+        !opts.dry_run || mode == Mode::Delete,
+        "--dry-run only applies to delete"
+    );
     let defaults = embedded_defaults();
     let file = load_file_config(&opts.config)?;
+    let target = opts.scope.or(file.scope).unwrap_or(defaults.scope);
+    let comment_model = opts
+        .model
+        .clone()
+        .or(file.model.clone())
+        .unwrap_or(defaults.model);
+    let doc_model = opts
+        .model
+        .clone()
+        .or(file.docstrings_model)
+        .or(file.model)
+        .unwrap_or(defaults.docstrings_model);
     let cfg = Config {
         target,
-        mode: if opts.delete {
-            Mode::Delete
-        } else {
-            Mode::Reduce
-        },
-        min_lines: opts
-            .min_lines
-            .or(file.min_lines)
-            .unwrap_or(defaults.min_lines),
-        min_density: opts
-            .min_density
-            .or(file.min_density)
-            .unwrap_or(defaults.min_density),
+        language: opts.language.or(file.language).unwrap_or(defaults.language),
+        mode,
         max_summary_words: opts
             .max_words
             .or(file.max_words)
@@ -571,36 +580,36 @@ fn main() -> Result<()> {
             .clone()
             .or(file.endpoint)
             .unwrap_or(defaults.endpoint),
-        model: opts
-            .model
-            .clone()
-            .or(match target {
-                Target::Comments => file.model,
-                Target::Docstrings => file.docstrings_model.or(file.model),
-            })
-            .unwrap_or(match target {
-                Target::Comments => defaults.model,
-                Target::Docstrings => defaults.docstrings_model,
-            }),
+        model: if target == Target::Docstrings {
+            doc_model.clone()
+        } else {
+            comment_model
+        },
+        docstrings_model: doc_model,
         api_key: opts.api_key.clone().or(file.api_key),
         llm_concurrency: opts.workers.or(file.workers).unwrap_or(defaults.workers),
         dry_run: opts.dry_run,
         verbose: opts.verbose,
+        database: opts.database.clone().or(file.database),
         ignore: merge_list(defaults.ignore, file.ignore),
         keep_decorators: merge_list(defaults.keep_decorators, file.keep_decorators),
         keep_bases: merge_list(defaults.keep_bases, file.keep_bases),
     };
+    anyhow::ensure!(cfg.llm_concurrency > 0, "workers must be at least 1");
+    anyhow::ensure!(cfg.max_summary_words > 0, "max_words must be at least 1");
     if let Some(dataset) = &opts.eval {
+        anyhow::ensure!(mode == Mode::Reduce, "--eval only applies to reduce");
         return match target {
             Target::Comments => commentreducr::eval::run(dataset, &cfg),
             Target::Docstrings => commentreducr::eval::run_docstrings(dataset, &cfg),
+            Target::All => anyhow::bail!("--eval requires --scope comments or --scope docstrings"),
         };
     }
     let default_path = PathBuf::from(".");
     let path = opts.path.as_deref().unwrap_or(&default_path);
     if opts.diagnose {
         println!("commentreducr {}", env!("CARGO_PKG_VERSION"));
-        let bad = commentreducr::diagnose(path, target, &cfg.ignore)?;
+        let bad = commentreducr::diagnose(path, target, cfg.language, &cfg.ignore)?;
         eprintln!("{bad} files with parse errors");
         if bad > 0 {
             std::process::exit(1);
@@ -611,6 +620,7 @@ fn main() -> Result<()> {
     let noun = match target {
         Target::Comments => "comments",
         Target::Docstrings => "docstrings",
+        Target::All => "items",
     };
     eprintln!(
         "{} files scanned, {} changed, {} skipped; {noun}: {} kept, {} deleted ({} lines), {} reduced ({} lines saved), {} LLM failures",
@@ -624,6 +634,16 @@ fn main() -> Result<()> {
         stats.lines_reduced,
         stats.llm_errors,
     );
+    if mode == Mode::Reduce {
+        eprintln!(
+            "classifier: {} screened, {} cached, {} errors; resume: {} verdicts cached, {} files completed",
+            stats.screened,
+            stats.classifier_cached,
+            stats.classifier_errors,
+            stats.verdicts_cached,
+            stats.files_resumed
+        );
+    }
     if let Some(t) = stats.tokens {
         eprintln!(
             "tokens: {t}; {:.1}s, {}",
@@ -640,156 +660,46 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn missing_config_is_default_and_bad_config_errors() {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "commentreducr-maintest-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("config.toml");
-        assert!(load_file_config(&path).unwrap().model.is_none());
-        std::fs::write(&path, "model = \"m\"\napi_key = \"k\"\nmin_lines = 2\n").unwrap();
-        let c = load_file_config(&path).unwrap();
-        assert_eq!(
-            (
-                c.model.as_deref(),
-                c.api_key.as_deref(),
-                c.endpoint,
-                c.docstrings_model,
-                c.min_lines
-            ),
-            (Some("m"), Some("k"), None, None, Some(2))
-        );
-        std::fs::write(&path, "model = ").unwrap();
-        assert!(load_file_config(&path).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn parse_config_readme_example_and_errors() {
-        // The README's example config, verbatim (mirrors src/default_config.toml; keep both in
-        // sync by hand if either changes).
-        let readme = r#"
-# Every default commentreducr ships with. Copy this into ~/.config/commentreducr/config.toml
-# (or --config FILE) and override only what you need; flags win over that file, which wins over
-# these defaults. List-valued keys like `ignore` are the exception: a config file's list is
-# appended to the shipped default, not swapped in for it.
-endpoint = "http://localhost:8000/v1"        # OpenAI-compatible base URL
-model = "gemma-4-e2b-it-4bit"                # used for comments (and docstrings if docstrings_model is unset)
-docstrings_model = "gemma-4-26b-a4b-it-4bit" # used for docstrings
-workers = 8                                   # worker threads / max in-flight LLM requests
-min_lines = 4                                 # minimum lines in a block before it's reduced
-min_density = 5.0                             # comments only: minimum average words per line
-max_words = 20                                # comments only: target max words in a summary
-ignore = ["migrations/"]   # gitignore-syntax patterns; a user config's list is appended to this one
-keep_decorators = ["tool", "command", "group"]   # docstrings under these decorators are never touched (Strands @tool, click/typer commands)
-keep_bases = ["Signature", "BaseModel"]          # class docstrings with these bases are never touched (dspy.Signature, pydantic.BaseModel)
-"#;
-        let c = parse_config(readme).unwrap();
-        assert_eq!(c.endpoint.as_deref(), Some("http://localhost:8000/v1"));
-        assert_eq!(c.model.as_deref(), Some("gemma-4-e2b-it-4bit"));
-        assert_eq!(
-            c.docstrings_model.as_deref(),
-            Some("gemma-4-26b-a4b-it-4bit")
-        );
-        assert_eq!(c.workers, Some(8));
-        assert_eq!(c.min_lines, Some(4));
-        assert_eq!(c.min_density, Some(5.0));
-        assert_eq!(c.max_words, Some(20));
-        assert_eq!(c.ignore, Some(vec!["migrations/".to_string()]));
-        assert_eq!(
-            c.keep_decorators,
-            Some(vec![
-                "tool".to_string(),
-                "command".to_string(),
-                "group".to_string()
-            ])
-        );
-        assert_eq!(
-            c.keep_bases,
-            Some(vec!["Signature".to_string(), "BaseModel".to_string()])
-        );
-
-        // escaped quote inside a string
-        let c = parse_config(r#"model = "a \"quoted\" name""#).unwrap();
-        assert_eq!(c.model.as_deref(), Some("a \"quoted\" name"));
-
-        // unknown keys are ignored, like the old serde-based parser
-        assert!(parse_config("nonsense = \"x\"\n").unwrap().model.is_none());
-
-        // errors: duplicate key, a [section] header, a string for a numeric key
-        assert!(parse_config("model = \"a\"\nmodel = \"b\"\n").is_err());
-        assert!(parse_config("[section]\n").is_err());
-        assert!(parse_config("min_lines = \"two\"\n").is_err());
-    }
-
-    #[test]
-    fn parse_config_arrays() {
-        let c = parse_config("ignore = [\"a\", \"b\"]\n").unwrap();
-        assert_eq!(c.ignore, Some(vec!["a".to_string(), "b".to_string()]));
-
-        let c = parse_config("ignore = []\n").unwrap();
-        assert_eq!(c.ignore, Some(vec![]));
-
-        // whitespace around items/commas, and a trailing comment
-        let c = parse_config("ignore = [ \"a\" , \"b\" ]   # patterns\n").unwrap();
-        assert_eq!(c.ignore, Some(vec!["a".to_string(), "b".to_string()]));
-
-        // errors: non-string item, nested array, unterminated (also covers a multi-line array,
-        // since the parser never looks past the current line), an array for a scalar key
-        assert!(parse_config("ignore = [1, \"b\"]\n").is_err());
-        assert!(parse_config("ignore = [[\"a\"]]\n").is_err());
-        assert!(parse_config("ignore = [\"a\"\n").is_err());
-        assert!(parse_config("min_lines = [\"a\"]\n").is_err());
-    }
-
-    #[test]
-    fn merge_list_appends_user_to_default() {
-        assert_eq!(
-            merge_list(vec!["a".to_string()], Some(vec!["b".to_string()])),
-            vec!["a".to_string(), "b".to_string()]
-        );
-        assert_eq!(
-            merge_list(vec!["a".to_string()], None),
-            vec!["a".to_string()]
-        );
-        assert_eq!(
-            merge_list(vec![], Some(vec!["b".to_string()])),
-            vec!["b".to_string()]
-        );
-    }
-
-    #[test]
-    fn embedded_default_config_parses_and_has_every_key() {
-        let c = parse_config(DEFAULT_CONFIG_TOML).expect("src/default_config.toml must parse");
-        assert!(c.endpoint.is_some());
-        assert!(c.model.is_some());
-        assert!(c.docstrings_model.is_some());
-        assert!(c.workers.is_some());
-        assert!(c.min_lines.is_some());
-        assert!(c.min_density.is_some());
-        assert!(c.max_words.is_some());
-        assert!(c.ignore.is_some());
-        assert!(c.keep_decorators.is_some());
-        assert!(c.keep_bases.is_some());
-    }
-
-    #[test]
-    fn embedded_defaults_match_help_text() {
-        // These literals mirror the `[default: ...]` text hardcoded in Opts' clap help strings
-        // above; keep both in sync by hand if src/default_config.toml's values ever change.
+    fn config_and_defaults_keep_layering_and_reject_malformed_values() {
         let d = embedded_defaults();
-        assert_eq!(d.endpoint, "http://localhost:8000/v1");
-        assert_eq!(d.model, "gemma-4-e2b-it-4bit");
-        assert_eq!(d.docstrings_model, "gemma-4-26b-a4b-it-4bit");
+        assert_eq!(d.scope, Target::All);
         assert_eq!(d.workers, 8);
-        assert_eq!(d.min_lines, 4);
-        assert_eq!(d.min_density, 5.0);
-        assert_eq!(d.max_words, 20);
+        let c = parse_config("scope = \"docstrings\"\nworkers = 2\ndatabase = \"state.db\"\nmodel = \"m\"\nignore = [\"vendor/\"]\nmin_lines = 100\n").unwrap();
+        assert_eq!(c.scope, Some(Target::Docstrings));
+        assert_eq!(c.workers, Some(2));
+        assert_eq!(c.database, Some(PathBuf::from("state.db")));
+        assert_eq!(c.model.as_deref(), Some("m"));
+        assert!(merge_list(d.ignore, c.ignore).contains(&"vendor/".to_string()));
+        for text in [
+            "scope = \"bad\"",
+            "workers = \"two\"",
+            "ignore = [1]",
+            "model = ",
+            "model = \"a\"\nmodel = \"b\"",
+            "[section]",
+        ] {
+            assert!(parse_config(text).is_err(), "{text}");
+        }
+        assert_eq!(
+            parse_config(r#"model = "a \"quoted\" name""#)
+                .unwrap()
+                .model
+                .as_deref(),
+            Some("a \"quoted\" name")
+        );
+    }
+    #[test]
+    fn cli_defaults_and_breaking_syntax() {
+        for mode in ["reduce", "delete"] {
+            assert!(
+                Cli::try_parse_from(["commentreducr", mode, "--scope", "all", "--workers", "2"])
+                    .is_ok()
+            );
+        }
+        for old in ["comments", "docstrings", "install-hook", "prepush-check"] {
+            assert!(Cli::try_parse_from(["commentreducr", old]).is_err());
+        }
+        assert!(Cli::try_parse_from(["commentreducr", "reduce", "--min-lines", "1"]).is_err());
     }
 }

@@ -7,16 +7,20 @@ pub mod hook_git;
 pub mod hook_model;
 pub mod llm;
 pub mod parse;
-pub mod policy;
 pub mod progress;
 pub mod prose;
+#[cfg(feature = "hook")]
+mod reduction;
 pub mod rewrite;
+#[cfg(feature = "hook")]
+pub mod state;
 pub mod structural;
 pub mod types;
 
-use anyhow::Result;
-use docstring::{DocKind, Docstring};
-use llm::{DocRequest, DocVerdict, LlmClient};
+use anyhow::{Context, Result, ensure};
+#[cfg(feature = "hook")]
+use docstring::DocKind;
+use docstring::Docstring;
 use progress::Progress;
 use rewrite::Edit;
 use std::panic::AssertUnwindSafe;
@@ -31,27 +35,22 @@ pub struct Stats {
     pub comments_kept: usize,
     pub comments_deleted: usize,
     pub comments_reduced: usize,
-    /// Source lines removed by Delete actions (comment block line count, or docstring
-    /// `end_line - start_line + 1`).
     pub lines_deleted: usize,
-    /// Net source lines saved by Reduce actions (original block/docstring line count minus the
-    /// replacement's line count, clamped at 0).
     pub lines_reduced: usize,
-    /// Files skipped because they could not be read, parsed, or processed (bug caught).
     pub files_skipped: usize,
-    /// Blocks left unchanged because the LLM call failed.
     pub llm_errors: usize,
-    /// Token usage over the run (reduce mode only).
+    pub classifier_errors: usize,
+    pub screened: usize,
+    pub classifier_cached: usize,
+    pub verdicts_cached: usize,
+    pub files_resumed: usize,
     pub tokens: Option<llm::TokenUsage>,
-    /// Wall time of the processing pass (after the preflight and scan).
     pub elapsed: std::time::Duration,
 }
 
 impl Stats {
     fn merge(&mut self, r: FileResult) {
-        if r.changed {
-            self.files_changed += 1;
-        }
+        self.files_changed += r.changed as usize;
         self.comments_kept += r.kept;
         self.comments_deleted += r.deleted;
         self.comments_reduced += r.reduced;
@@ -62,11 +61,10 @@ impl Stats {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.files_skipped > 0 || self.llm_errors > 0
+        self.files_skipped > 0 || self.llm_errors > 0 || self.classifier_errors > 0
     }
 }
 
-/// Per-file outcome, folded into `Stats` once every task has finished.
 #[derive(Default)]
 struct FileResult {
     changed: bool,
@@ -80,9 +78,6 @@ struct FileResult {
 }
 
 impl FileResult {
-    /// One-line per-file summary of deletes/reduces for `path`, e.g.
-    /// `src/foo.py: 3 deleted (45 lines), 1 reduced (12 lines saved)`. Zero parts are omitted;
-    /// `None` if the file had neither a delete nor a reduce.
     fn summary_line(&self, path: &Path) -> Option<String> {
         if self.deleted == 0 && self.reduced == 0 {
             return None;
@@ -104,71 +99,220 @@ impl FileResult {
     }
 }
 
-/// Process every tracked source file under `root`.
-/// Per file: read (skip non-UTF-8 with a warning), extract_comments -> group_blocks, for each block
-/// analyze + is_structural + decide; Reduce actions call the LLM with bounded concurrency; build
-/// edits; rewrite::apply; write back only if changed (skipped when `cfg.dry_run`). Either way, a
-/// one-line per-file summary of deletes/reduces is printed to stdout (see `write_edits`), and
-/// per-block detail lines too when `cfg.verbose`.
-/// In reduce mode the endpoint is checked before any file is touched. After that the run is
-/// best-effort: a failed LLM call leaves that block unchanged, and a panic while processing a file
-/// (a bug) skips that file. Both are warned about and counted in `Stats`; nothing is written for a
-/// file unless its whole pass succeeded.
-/// Files are processed on `cfg.llm_concurrency` worker threads. Reduce mode first does a fast
-/// scan (parse + decide, no LLM) to count the blocks that will need an LLM call, so the second
-/// pass can show percentage progress and an estimate of the time left.
+#[derive(Clone)]
+enum Item {
+    Comment(CommentBlock),
+    Docstring(Docstring),
+}
+
+impl Item {
+    fn range(&self) -> (usize, usize, usize, usize) {
+        match self {
+            Self::Comment(b) => (b.start, b.end, b.start_line + 1, b.end_line + 1),
+            Self::Docstring(d) => (d.start, d.end, d.start_line + 1, d.end_line + 1),
+        }
+    }
+
+    fn delete(&self, source: &str) -> Option<Edit> {
+        match self {
+            Self::Comment(b) => Some(rewrite::delete_edit(source, b)),
+            Self::Docstring(d) => docstring::delete_edit(source, d),
+        }
+    }
+
+    #[cfg(feature = "hook")]
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Comment(_) => "comment",
+            Self::Docstring(d) if d.is_test => "test_docstring",
+            Self::Docstring(d) => match d.kind {
+                DocKind::Module => "module_docstring",
+                DocKind::Class => "class_docstring",
+                DocKind::Function => "function_docstring",
+            },
+        }
+    }
+
+    #[cfg(feature = "hook")]
+    fn text(&self) -> String {
+        match self {
+            Self::Comment(b) => b
+                .comments
+                .iter()
+                .map(|c| c.text.trim())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Self::Docstring(d) => d.text.clone(),
+        }
+    }
+
+    #[cfg(feature = "hook")]
+    fn reduce(
+        &self,
+        source: &str,
+        lang: Language,
+        client: &llm::LlmClient,
+        cfg: &Config,
+    ) -> Result<(&'static str, Option<Edit>)> {
+        match self {
+            Self::Comment(b) => {
+                let text = prose::clean_lines(b, lang).join("\n");
+                let lines: Vec<&str> = source.lines().collect();
+                let context = lines
+                    .iter()
+                    .skip(b.end_line + 1)
+                    .map(|l| l.trim())
+                    .find(|l| !l.is_empty())
+                    .unwrap_or("");
+                match client.summarize(&text, context, cfg.max_summary_words)? {
+                    llm::Verdict::Delete => Ok(("delete", self.delete(source))),
+                    llm::Verdict::Line(summary) => {
+                        ensure!(
+                            !summary.contains(['\n', '\r', '\u{2028}', '\u{2029}'])
+                                && !summary.contains("*/"),
+                            "unsafe comment replacement"
+                        );
+                        Ok((
+                            "reduce",
+                            Some(rewrite::reduce_edit(source, b, lang, &summary)),
+                        ))
+                    }
+                }
+            }
+            Self::Docstring(d) => {
+                let request = llm::DocRequest {
+                    kind: match d.kind {
+                        DocKind::Module => "module",
+                        DocKind::Class => "class",
+                        DocKind::Function => "function",
+                    },
+                    name: &d.name,
+                    signature: &d.signature,
+                    is_test: d.is_test,
+                    in_test_file: d.in_test_file,
+                    text: &d.text,
+                    body_preview: &d.body_preview,
+                    body_lines: d.body_lines,
+                };
+                match client.rewrite_docstring(&request)? {
+                    llm::DocVerdict::Delete => Ok(("delete", self.delete(source))),
+                    llm::DocVerdict::Text(text) => {
+                        let edit = docstring::replace_edit(source, d, &text)
+                            .context("unsafe docstring replacement")?;
+                        Ok(("reduce", Some(edit)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct Plan {
+    source: String,
+    items: Vec<Item>,
+    kept: usize,
+}
+
+fn plan_file(path: &Path, lang: Language, cfg: &Config) -> Result<Plan> {
+    ensure!(
+        !std::fs::symlink_metadata(path)?.file_type().is_symlink(),
+        "source file is a symlink"
+    );
+    let source = std::fs::read_to_string(path)?;
+    let mut items = Vec::new();
+    let mut kept = 0;
+    if cfg.target != Target::Docstrings {
+        for b in parse::group_blocks(&source, parse::extract_comments(&source, lang)?) {
+            if structural::is_structural(&b, lang, &source) {
+                kept += 1;
+            } else {
+                items.push(Item::Comment(b));
+            }
+        }
+    }
+    if cfg.target != Target::Comments && lang == Language::Python {
+        for d in
+            docstring::extract_docstrings(&source, docstring::is_test_file(path), &cfg.keep_bases)?
+        {
+            if docstring::is_structural(&d, &source, &cfg.keep_decorators) {
+                kept += 1;
+            } else {
+                items.push(Item::Docstring(d));
+            }
+        }
+    }
+    items.sort_by_key(|i| i.range().0);
+    Ok(Plan {
+        source,
+        items,
+        kept,
+    })
+}
+
 pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
+    ensure!(cfg.llm_concurrency > 0, "workers must be at least 1");
     let mut tracked = files::tracked_source_files(root, &cfg.ignore)?;
+    tracked.retain(|(_, lang)| cfg.language.matches(*lang));
     if cfg.target == Target::Docstrings {
         tracked.retain(|(_, lang)| *lang == Language::Python);
     }
-    let llm = (cfg.mode == Mode::Reduce).then(|| LlmClient::new(cfg));
-    let mut progress = Progress::silent();
-    if let Some(client) = &llm {
-        client.check()?;
-        let mut total = 0;
-        tracked = parallel(tracked, cfg.llm_concurrency, |(path, lang)| {
-            match cfg.target {
-                Target::Comments => reduce_block_count(path, *lang, cfg),
-                Target::Docstrings => reduce_docstring_count(path, cfg),
-            }
-        })
-        .into_iter()
-        .map(|(item, n)| {
-            total += n.unwrap_or(0);
-            item
-        })
-        .collect();
-        let noun = match cfg.target {
-            Target::Comments => "comment blocks",
-            Target::Docstrings => "docstrings",
-        };
-        eprintln!("{} files, {total} {noun} to send to the LLM", tracked.len());
-        progress = Progress::new(total, tracked.len(), llm.as_ref().map(|c| &c.tokens));
+    if cfg.mode == Mode::Reduce {
+        #[cfg(feature = "hook")]
+        return reduction::run(root, tracked, cfg);
+        #[cfg(not(feature = "hook"))]
+        anyhow::bail!(
+            "reduce requires the optional classifier: cargo install commentreducr --features hook"
+        );
     }
-
+    let progress = Progress::silent();
     let mut stats = Stats {
         files_scanned: tracked.len(),
         ..Stats::default()
     };
-    let results = parallel(tracked, cfg.llm_concurrency, |(path, lang)| {
-        let r = match cfg.target {
-            Target::Comments => process_file(path, *lang, llm.as_ref(), cfg, &progress),
-            Target::Docstrings => process_docstrings(path, llm.as_ref(), cfg, &progress),
-        };
-        progress.file_done();
-        r
-    });
-    progress.finish();
-    stats.elapsed = progress.elapsed();
-    stats.tokens = llm.as_ref().map(|c| c.tokens.snapshot());
-    for ((path, _), res) in results {
-        match res {
-            Ok(r) => stats.merge(r),
-            Err(msg) => {
+    for ((path, _), r) in parallel(
+        tracked,
+        cfg.llm_concurrency,
+        |(path, lang)| -> Result<FileResult> {
+            let plan = plan_file(path, *lang, cfg)?;
+            let mut result = FileResult {
+                kept: plan.kept,
+                ..FileResult::default()
+            };
+            let mut edits = Vec::new();
+            for item in plan.items {
+                if let Some(edit) = item.delete(&plan.source) {
+                    result.deleted += 1;
+                    let (_, _, start, end) = item.range();
+                    result.lines_deleted += end - start + 1;
+                    edits.push(edit);
+                } else {
+                    result.kept += 1;
+                }
+            }
+            let after = rewrite::apply(&plan.source, edits);
+            parse::extract_comments(&after, *lang)
+                .context("rewrite would introduce a parse error")?;
+            result.changed = after != plan.source;
+            if result.changed && !cfg.dry_run {
+                atomic_write(path, &plan.source, &after)?;
+            }
+            if let Some(line) = result.summary_line(path) {
+                progress.print(line);
+            }
+            Ok(result)
+        },
+    ) {
+        match r {
+            Ok(Ok(r)) => stats.merge(r),
+            other => {
                 eprintln!(
-                    "warning: skipping {} (internal error: {msg})",
-                    path.display()
+                    "warning: skipping {} ({})",
+                    path.display(),
+                    match other {
+                        Ok(Err(e)) => format!("{e:#}"),
+                        Err(e) => e,
+                        _ => unreachable!(),
+                    }
                 );
                 stats.files_skipped += 1;
             }
@@ -177,13 +321,54 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
     Ok(stats)
 }
 
-/// Parse every tracked source file under `root` (for `Target::Docstrings`, Python files only) and
-/// print a redacted report (see `parse::diagnose`) of each one with parse errors to stdout,
-/// numbered; the path each number stands for goes to stderr so the stdout report can be pasted
-/// into a bug report as is. No LLM, no writes. Returns the number of files with parse errors.
-pub fn diagnose(root: &Path, target: Target, ignore: &[String]) -> Result<usize> {
+// Rename a complete, synced sibling file only while the original still matches the plan.
+fn atomic_write(path: &Path, before: &str, after: &str) -> Result<()> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let meta = std::fs::symlink_metadata(path)?;
+    ensure!(!meta.file_type().is_symlink(), "source file is a symlink");
+    let dir = path.parent().context("source file has no parent")?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp = dir.join(format!(
+        ".commentreducr-{}-{stamp}-{serial}.tmp",
+        std::process::id()
+    ));
+    let mut created = false;
+    let result = (|| -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
+        created = true;
+        file.write_all(after.as_bytes())?;
+        file.set_permissions(meta.permissions())?;
+        file.sync_all()?;
+        ensure!(
+            std::fs::read_to_string(path)? == before,
+            "file changed during analysis; rerun to rescan"
+        );
+        std::fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if created {
+        let _ = std::fs::remove_file(temp);
+    }
+    result
+}
+
+pub fn diagnose(
+    root: &Path,
+    target: Target,
+    language: Languages,
+    ignore: &[String],
+) -> Result<usize> {
     let mut bad = 0;
     let mut tracked = files::tracked_source_files(root, ignore)?;
+    tracked.retain(|(_, lang)| language.matches(*lang));
     if target == Target::Docstrings {
         tracked.retain(|(_, lang)| *lang == Language::Python);
     }
@@ -195,9 +380,7 @@ pub fn diagnose(root: &Path, target: Target, ignore: &[String]) -> Result<usize>
                 continue;
             }
         };
-        if let Some(report) =
-            parse::diagnose(&src, lang).map_err(|e| e.context(path.display().to_string()))?
-        {
+        if let Some(report) = parse::diagnose(&src, lang)? {
             bad += 1;
             eprintln!("file {bad}: {}", path.display());
             println!("### file {bad}: {report}");
@@ -206,8 +389,6 @@ pub fn diagnose(root: &Path, target: Target, ignore: &[String]) -> Result<usize>
     Ok(bad)
 }
 
-/// Run `f` over `items` on `workers` threads. A panic inside `f` is caught and returned as its
-/// message, so one bad item cannot take the run down.
 pub(crate) fn parallel<T: Send, R: Send>(
     items: Vec<T>,
     workers: usize,
@@ -222,367 +403,18 @@ pub(crate) fn parallel<T: Send, R: Send>(
                     let Some(item) = queue.lock().unwrap().next() else {
                         break;
                     };
-                    let r = std::panic::catch_unwind(AssertUnwindSafe(|| f(&item)))
-                        .map_err(panic_message);
+                    let r = std::panic::catch_unwind(AssertUnwindSafe(|| f(&item))).map_err(|p| {
+                        p.downcast_ref::<String>()
+                            .cloned()
+                            .or_else(|| p.downcast_ref::<&str>().map(|s| s.to_string()))
+                            .unwrap_or_else(|| "panic".to_owned())
+                    });
                     out.lock().unwrap().push((item, r));
                 }
             });
         }
     });
     out.into_inner().unwrap()
-}
-
-/// Read and parse one file and decide an action for every comment block (no LLM, no writes).
-/// Recoverable failures (unreadable / non-UTF-8 file, a parser error) come back as a message.
-fn plan_file(
-    path: &Path,
-    lang: Language,
-    cfg: &Config,
-) -> Result<(String, Vec<(CommentBlock, Action)>), String> {
-    let src = std::fs::read_to_string(path).map_err(|e| format!("unreadable: {e}"))?;
-    let comments = parse::extract_comments(&src, lang).map_err(|e| format!("{e:#}"))?;
-    let plan = parse::group_blocks(&src, comments)
-        .into_iter()
-        .map(|block| {
-            let analysis = prose::analyze(&block, lang);
-            let structural = structural::is_structural(&block, lang, &src);
-            let action = policy::decide(&block, &analysis, structural, cfg);
-            (block, action)
-        })
-        .collect();
-    Ok((src, plan))
-}
-
-/// Number of blocks in the file that will need an LLM call; 0 for a file that cannot be planned
-/// (the real pass will warn about it).
-fn reduce_block_count(path: &Path, lang: Language, cfg: &Config) -> usize {
-    plan_file(path, lang, cfg).map_or(0, |(_, plan)| {
-        plan.iter()
-            .filter(|(_, a)| matches!(a, Action::Reduce { .. }))
-            .count()
-    })
-}
-
-/// Read, analyze and (if anything changed) rewrite one file. Recoverable failures (unreadable /
-/// non-UTF-8 file, a parser error) are reported with a warning and the file is skipped; a failed
-/// LLM call leaves that block unchanged.
-fn process_file(
-    path: &Path,
-    lang: Language,
-    llm: Option<&LlmClient>,
-    cfg: &Config,
-    progress: &Progress,
-) -> FileResult {
-    let mut result = FileResult::default();
-    let (src, plan) = match plan_file(path, lang, cfg) {
-        Ok(p) => p,
-        Err(msg) => {
-            progress.warn(format!("skipping {} ({msg})", path.display()));
-            result.skipped = true;
-            return result;
-        }
-    };
-    let lines: Vec<&str> = src.lines().collect();
-
-    let mut edits = Vec::new();
-    for (block, action) in &plan {
-        match action {
-            Action::Keep => result.kept += 1,
-            Action::Delete => {
-                result.deleted += 1;
-                result.lines_deleted += block.line_count();
-                if cfg.verbose {
-                    progress.print(format!(
-                        "{}:{}: delete {} lines",
-                        path.display(),
-                        block.start_line + 1,
-                        block.line_count()
-                    ));
-                }
-                edits.push(rewrite::delete_edit(&src, block));
-            }
-            Action::Reduce { prose } => {
-                let context = first_nonblank_after(&lines, block.end_line);
-                let line = block.start_line + 1;
-                let client = llm.expect("reduce mode has an LLM");
-                let verdict = client.summarize(prose, &context, cfg.max_summary_words);
-                progress.tick();
-                let verdict = match verdict {
-                    Ok(v) => v,
-                    Err(err) => {
-                        progress.warn(format!(
-                            "{}:{line}: left unchanged, LLM failed ({err:#})",
-                            path.display()
-                        ));
-                        result.llm_errors += 1;
-                        result.kept += 1;
-                        continue;
-                    }
-                };
-                match verdict {
-                    llm::Verdict::Delete => {
-                        result.deleted += 1;
-                        result.lines_deleted += block.line_count();
-                        if cfg.verbose {
-                            progress.print(format!(
-                                "{}:{line}: delete {} lines (llm)",
-                                path.display(),
-                                block.line_count()
-                            ));
-                        }
-                        edits.push(rewrite::delete_edit(&src, block));
-                    }
-                    llm::Verdict::Line(summary) => {
-                        result.reduced += 1;
-                        result.lines_reduced += block.line_count().saturating_sub(1);
-                        if cfg.verbose {
-                            progress
-                                .print(format!("{}:{line}: reduce -> {summary}", path.display()));
-                        }
-                        edits.push(rewrite::reduce_edit(&src, block, lang, &summary));
-                    }
-                }
-            }
-        }
-    }
-
-    write_edits(path, &src, edits, cfg, progress, &mut result);
-    result
-}
-
-/// Shared tail of `process_file`/`process_docstrings`: print the per-file summary line (see
-/// `FileResult::summary_line`) whenever the file had at least one delete or reduce, then apply
-/// the collected edits and, unless `dry_run`, write the file back if anything actually changed.
-/// No-op (beyond the summary line) when `edits` is empty.
-fn write_edits(
-    path: &Path,
-    src: &str,
-    edits: Vec<Edit>,
-    cfg: &Config,
-    progress: &Progress,
-    result: &mut FileResult,
-) {
-    if let Some(line) = result.summary_line(path) {
-        progress.print(line);
-    }
-    if edits.is_empty() {
-        return;
-    }
-    let new_src = rewrite::apply(src, edits);
-    if new_src != src {
-        result.changed = true;
-        if !cfg.dry_run
-            && let Err(err) = std::fs::write(path, &new_src)
-        {
-            progress.warn(format!("failed to write {}: {err}", path.display()));
-            result.changed = false;
-        }
-    }
-}
-
-/// Decision for one docstring (mirrors `Action` for comment blocks). The `Delete` edit is
-/// computed at plan time (it is pure, given `src` and the docstring) so it need not be recomputed
-/// when applying it.
-enum DocAction {
-    Keep,
-    Delete(Edit),
-    Reduce,
-}
-
-/// structural => Keep (both modes); Delete mode => Delete when `docstring::delete_edit` finds it
-/// safe to remove, else Keep; Reduce mode => Reduce when the docstring has at least
-/// `cfg.min_lines` non-blank text lines, else Keep (the LLM call itself happens in
-/// `process_docstrings`, not here).
-fn decide_docstring(doc: &Docstring, src: &str, cfg: &Config) -> DocAction {
-    if docstring::is_structural(doc, src, &cfg.keep_decorators) {
-        return DocAction::Keep;
-    }
-    match cfg.mode {
-        Mode::Delete => match docstring::delete_edit(src, doc) {
-            Some(edit) => DocAction::Delete(edit),
-            None => DocAction::Keep,
-        },
-        Mode::Reduce => {
-            let non_blank = doc.text.lines().filter(|l| !l.trim().is_empty()).count();
-            if non_blank < cfg.min_lines {
-                DocAction::Keep
-            } else {
-                DocAction::Reduce
-            }
-        }
-    }
-}
-
-/// Read and parse one Python file and decide an action for every docstring (no LLM, no writes).
-/// Recoverable failures (unreadable / non-UTF-8 file, a parser error) come back as a message.
-fn plan_docstrings(
-    path: &Path,
-    cfg: &Config,
-) -> Result<(String, Vec<(Docstring, DocAction)>), String> {
-    let src = std::fs::read_to_string(path).map_err(|e| format!("unreadable: {e}"))?;
-    let in_test_file = docstring::is_test_file(path);
-    let docs = docstring::extract_docstrings(&src, in_test_file, &cfg.keep_bases)
-        .map_err(|e| format!("{e:#}"))?;
-    let plan = docs
-        .into_iter()
-        .map(|doc| {
-            let action = decide_docstring(&doc, &src, cfg);
-            (doc, action)
-        })
-        .collect();
-    Ok((src, plan))
-}
-
-/// Number of docstrings in the file that will need an LLM call; 0 for a file that cannot be
-/// planned (the real pass will warn about it).
-fn reduce_docstring_count(path: &Path, cfg: &Config) -> usize {
-    plan_docstrings(path, cfg).map_or(0, |(_, plan)| {
-        plan.iter()
-            .filter(|(_, a)| matches!(a, DocAction::Reduce))
-            .count()
-    })
-}
-
-/// `DocRequest` view of one extracted docstring, for `LlmClient::rewrite_docstring`.
-fn doc_request(doc: &Docstring) -> DocRequest<'_> {
-    DocRequest {
-        kind: match doc.kind {
-            DocKind::Module => "module",
-            DocKind::Class => "class",
-            DocKind::Function => "function",
-        },
-        name: &doc.name,
-        signature: &doc.signature,
-        is_test: doc.is_test,
-        in_test_file: doc.in_test_file,
-        text: &doc.text,
-        body_preview: &doc.body_preview,
-        body_lines: doc.body_lines,
-    }
-}
-
-/// Read, analyze and (if anything changed) rewrite one Python file's docstrings. Recoverable
-/// failures (unreadable / non-UTF-8 file, a parser error) are reported with a warning and the
-/// file is skipped; a failed LLM call, or a reply `docstring::replace_edit` refuses as unsafe,
-/// leaves that docstring unchanged.
-fn process_docstrings(
-    path: &Path,
-    llm: Option<&LlmClient>,
-    cfg: &Config,
-    progress: &Progress,
-) -> FileResult {
-    let mut result = FileResult::default();
-    let (src, plan) = match plan_docstrings(path, cfg) {
-        Ok(p) => p,
-        Err(msg) => {
-            progress.warn(format!("skipping {} ({msg})", path.display()));
-            result.skipped = true;
-            return result;
-        }
-    };
-
-    let mut edits = Vec::new();
-    for (doc, action) in plan {
-        match action {
-            DocAction::Keep => result.kept += 1,
-            DocAction::Delete(edit) => {
-                result.deleted += 1;
-                result.lines_deleted += doc.end_line - doc.start_line + 1;
-                if cfg.verbose {
-                    progress.print(format!(
-                        "{}:{}: delete docstring ({} lines)",
-                        path.display(),
-                        doc.start_line + 1,
-                        doc.end_line - doc.start_line + 1,
-                    ));
-                }
-                edits.push(edit);
-            }
-            DocAction::Reduce => {
-                let line = doc.start_line + 1;
-                let client = llm.expect("reduce mode has an LLM");
-                let verdict = client.rewrite_docstring(&doc_request(&doc));
-                progress.tick();
-                let verdict = match verdict {
-                    Ok(v) => v,
-                    Err(err) => {
-                        progress.warn(format!(
-                            "{}:{line}: left unchanged, LLM failed ({err:#})",
-                            path.display()
-                        ));
-                        result.llm_errors += 1;
-                        result.kept += 1;
-                        continue;
-                    }
-                };
-                match verdict {
-                    DocVerdict::Delete => match docstring::delete_edit(&src, &doc) {
-                        Some(edit) => {
-                            result.deleted += 1;
-                            result.lines_deleted += doc.end_line - doc.start_line + 1;
-                            if cfg.verbose {
-                                progress.print(format!(
-                                    "{}:{line}: delete docstring ({} lines)",
-                                    path.display(),
-                                    doc.end_line - doc.start_line + 1,
-                                ));
-                            }
-                            edits.push(edit);
-                        }
-                        None => result.kept += 1,
-                    },
-                    DocVerdict::Text(t) => match docstring::replace_edit(&src, &doc, &t) {
-                        Some(edit) => {
-                            result.reduced += 1;
-                            let original = doc.end_line - doc.start_line + 1;
-                            result.lines_reduced += original.saturating_sub(t.lines().count());
-                            if cfg.verbose {
-                                progress.print(format!(
-                                    "{}:{line}: reduce docstring -> {}",
-                                    path.display(),
-                                    t.lines().next().unwrap_or("")
-                                ));
-                            }
-                            edits.push(edit);
-                        }
-                        None => {
-                            progress.warn(format!(
-                                "{}:{line}: left unchanged, unusable LLM reply",
-                                path.display()
-                            ));
-                            result.llm_errors += 1;
-                            result.kept += 1;
-                        }
-                    },
-                }
-            }
-        }
-    }
-
-    write_edits(path, &src, edits, cfg, progress, &mut result);
-    result
-}
-
-/// Best-effort text of a panic payload.
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "panic".to_string()
-    }
-}
-
-/// First non-blank line strictly after `end_line` (0-based), trimmed and capped at 120 chars.
-fn first_nonblank_after(lines: &[&str], end_line: usize) -> String {
-    lines
-        .iter()
-        .skip(end_line + 1)
-        .map(|l| l.trim())
-        .find(|l| !l.is_empty())
-        .map(|l| l.chars().take(120).collect())
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

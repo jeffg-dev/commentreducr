@@ -1,6 +1,10 @@
 pub mod docstring;
 pub mod eval;
 pub mod files;
+#[cfg(feature = "hook")]
+pub mod hook_git;
+#[cfg(feature = "hook")]
+pub mod hook_model;
 pub mod llm;
 pub mod parse;
 pub mod policy;

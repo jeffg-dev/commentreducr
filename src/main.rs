@@ -32,6 +32,116 @@ enum Command {
     /// Python docstrings (module, class, function)
     #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
     Docstrings(Opts),
+    /// Install a warning-only pre-push hook and prepare the local Python classifier
+    #[cfg(feature = "hook")]
+    InstallHook,
+    /// Check changed Python comments and docstrings in commits being pushed
+    #[cfg(feature = "hook")]
+    PrepushCheck(HookOpts),
+}
+
+#[cfg(feature = "hook")]
+#[derive(clap::Args, Debug)]
+struct HookOpts {
+    /// Print findings and check errors to stdout, and always exit successfully
+    #[arg(long)]
+    warn: bool,
+    /// Config file for ignore patterns and structural docstring exemptions
+    #[arg(long, value_name = "FILE", default_value_os_t = default_config_path(), hide_default_value = true)]
+    config: PathBuf,
+    #[arg(hide = true)]
+    remote_name: Option<String>,
+    #[arg(hide = true, requires = "remote_name")]
+    remote_location: Option<String>,
+}
+
+#[cfg(feature = "hook")]
+fn install_hook() -> Result<()> {
+    let directory = std::env::current_dir()?;
+    let status = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(&directory)
+        .output()?;
+    anyhow::ensure!(
+        status.status.success(),
+        "run install-hook inside a Git repository"
+    );
+    commentreducr::hook_model::install_model()?;
+    let path = commentreducr::hook_git::install(&directory)?;
+    println!("Installed warning-only pre-push hook: {}", path.display());
+    Ok(())
+}
+
+#[cfg(feature = "hook")]
+fn prepush_check(opts: &HookOpts) -> Result<()> {
+    let result = (|| -> Result<bool> {
+        let defaults = embedded_defaults();
+        let file = load_file_config(&opts.config)?;
+        let mut input = String::new();
+        if opts.remote_name.is_some() {
+            use std::io::Read;
+            std::io::stdin().read_to_string(&mut input)?;
+        }
+        let blocks = commentreducr::hook_git::changed_blocks(
+            &std::env::current_dir()?,
+            opts.remote_name.as_ref().map(|_| input.as_str()),
+            opts.remote_name.as_deref(),
+            &merge_list(defaults.ignore, file.ignore),
+            &merge_list(defaults.keep_decorators, file.keep_decorators),
+            &merge_list(defaults.keep_bases, file.keep_bases),
+        )?;
+        if blocks.is_empty() {
+            println!("commentreducr: no changed Python documentation blocks.");
+            return Ok(false);
+        }
+        let mut classifier = commentreducr::hook_model::Classifier::load()?;
+        let mut findings = 0;
+        let mut errors = 0;
+        for block in &blocks {
+            match classifier.probability(&block.kind, &block.text, &block.context) {
+                Ok(score) if score >= classifier.threshold() => {
+                    findings += 1;
+                    let advice = if block.kind == "comment" {
+                        "Keep only an unexpected reason, a non-obvious trap, or a shortcut through complex code."
+                    } else {
+                        "Keep the consumer contract: purpose, usage, results, and exceptions."
+                    };
+                    println!(
+                        "{}:{}-{}: possible {} bloat. {advice}",
+                        block.path.display(),
+                        block.start_line,
+                        block.end_line,
+                        block.kind.replace('_', " ")
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    errors += 1;
+                    println!(
+                        "{}:{}: could not check this block: {error:#}",
+                        block.path.display(),
+                        block.start_line
+                    );
+                }
+            }
+        }
+        println!(
+            "commentreducr: {} changed blocks checked; {findings} findings; {errors} check errors.",
+            blocks.len()
+        );
+        Ok(findings > 0 || errors > 0)
+    })();
+    let failed = match result {
+        Ok(failed) => failed,
+        Err(error) => {
+            println!("commentreducr: could not complete pre-push check: {error:#}");
+            true
+        }
+    };
+    if failed && !opts.warn {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 /// Field order is help order: common flags, then the "LLM" heading, then "Advanced" (long
@@ -422,6 +532,10 @@ fn main() -> Result<()> {
     let (target, opts) = match &cli.command {
         Command::Comments(o) => (Target::Comments, o),
         Command::Docstrings(o) => (Target::Docstrings, o),
+        #[cfg(feature = "hook")]
+        Command::InstallHook => return install_hook(),
+        #[cfg(feature = "hook")]
+        Command::PrepushCheck(opts) => return prepush_check(opts),
     };
     // clap's `requires = "delete"` on --dry-run only fires against the arguments actually typed,
     // so `--reduce --dry-run` (an explicit --reduce, rather than --reduce's absence) sails past

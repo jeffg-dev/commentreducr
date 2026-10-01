@@ -1,0 +1,16 @@
+{
+  "threshold": 0.9450385272502899,
+  "max_length": 384,
+  "inference_batch_size": 1,
+  "labels": [
+    "PASS",
+    "FLAG"
+  ],
+  "encoder": "microsoft/MiniLM-L12-H384-uncased",
+  "revision": "44acabbec0ef496f6dbc93adadea57f376b7c0ec",
+  "pad_token_id": 0,
+  "pad_token": "[PAD]",
+  "input": "BERT pair: kind + complete target text, Python context; only context truncated",
+  "rubric_version": "strict-binary-v2",
+  "feedback": "Remove unnecessary prose; keep only a justified comment or consumer-facing contract."
+}

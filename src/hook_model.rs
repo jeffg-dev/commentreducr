@@ -8,7 +8,8 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use tokenizers::{Tokenizer, TruncationParams, TruncationStrategy};
 
-const MODEL_SHA256: &str = "d61e7db485fdc3cae445e674194b528fa424d118320845d8a24b0c67781e4442";
+pub(crate) const MODEL_SHA256: &str =
+    "d61e7db485fdc3cae445e674194b528fa424d118320845d8a24b0c67781e4442";
 const MODEL_URL: &str = "https://raw.githubusercontent.com/jeffg-dev/commentreducr/main/models/python-hook-minilm-l12-v1/model.onnx";
 const MODEL_BYTES: u64 = 34_168_774;
 const TOKENIZER: &[u8] = include_bytes!("model/minilm-l12-tokenizer.json");
@@ -84,7 +85,8 @@ pub struct Classifier {
 impl Classifier {
     pub fn load() -> Result<Self> {
         let path = model_path()?;
-        Self::from_file(&path).context("run `commentreducr install-hook` once to prepare the model")
+        Self::from_file(&path)
+            .context("run `commentreducr install-git-hook` once to prepare the model")
     }
 
     pub fn from_file(path: &Path) -> Result<Self> {

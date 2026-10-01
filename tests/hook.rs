@@ -81,7 +81,7 @@ fn warnings_findings_and_errors_exit_zero_while_strict_checks_fail() {
     let dirty = "not valid Python (\n";
     std::fs::write(repo.0.join("cues.py"), dirty).unwrap();
 
-    let warning = repo.cli(&["prepush-check", "--warn"]);
+    let warning = repo.cli(&["check", "--warn"]);
     assert!(warning.status.success());
     let stdout = String::from_utf8(warning.stdout).unwrap();
     assert!(stdout.contains("cues.py:2-"), "{stdout}");
@@ -90,7 +90,7 @@ fn warnings_findings_and_errors_exit_zero_while_strict_checks_fail() {
         "{stdout}"
     );
     assert!(warning.stderr.is_empty());
-    let strict = repo.cli(&["prepush-check"]);
+    let strict = repo.cli(&["check"]);
     assert_eq!(strict.status.code(), Some(1));
     assert_eq!(
         std::fs::read_to_string(repo.0.join("cues.py")).unwrap(),
@@ -98,11 +98,11 @@ fn warnings_findings_and_errors_exit_zero_while_strict_checks_fail() {
     );
 
     repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
-    assert!(repo.cli(&["prepush-check"]).status.success());
+    assert!(repo.cli(&["check"]).status.success());
 
     let mut outside = Command::new(env!("CARGO_BIN_EXE_commentreducr"));
     outside
-        .args(["prepush-check", "--warn"])
+        .args(["check", "--warn"])
         .current_dir(std::env::temp_dir());
     let warning = outside.output().unwrap();
     assert!(warning.status.success());
@@ -125,10 +125,10 @@ fn installed_hook_reports_real_push_without_blocking_or_reading_dirty_files() {
     repo.git(&["push", "-q", "-u", "origin", "main"]);
     let pushed = repo.commit(&bloated_source());
     std::fs::write(repo.0.join("cues.py"), "broken Python (\n").unwrap();
-    assert!(repo.cli(&["install-hook"]).status.success());
+    assert!(repo.cli(&["install-git-hook"]).status.success());
     let hook = repo.0.join(".git/hooks/pre-push");
     let contents = std::fs::read(&hook).unwrap();
-    assert!(repo.cli(&["install-hook"]).status.success());
+    assert!(repo.cli(&["install-git-hook"]).status.success());
     assert_eq!(std::fs::read(&hook).unwrap(), contents);
 
     let bin = repo.0.join("bin");

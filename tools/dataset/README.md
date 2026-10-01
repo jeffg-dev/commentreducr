@@ -156,7 +156,7 @@ it names that other step; naming another module or caller as the *reason* is wha
 ### How to run
 
 ```
-cargo run -- docstrings --eval tools/dataset/docstrings.jsonl
+cargo run -- reduce --scope docstrings --eval tools/dataset/docstrings.jsonl
 ```
 
 Measured 2026-09-08 against oMLX, 8 requests in flight:

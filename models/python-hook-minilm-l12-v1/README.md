@@ -31,5 +31,5 @@ additional false flag; CPU runtime builds produced different numeric scores.
 The weights, tokenizer, rubric, and threshold were unchanged. The installer
 therefore uses author-feedback warning mode.
 
-`install-hook` downloads this versioned model into the user's cache and verifies
+`install-git-hook` downloads this versioned model into the user's cache and verifies
 its checksum. Model binaries are excluded from the crates.io package.

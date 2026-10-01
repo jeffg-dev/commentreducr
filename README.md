@@ -11,8 +11,8 @@ workaround, a caller contract. Never touches code, strings or structural comment
 
 ## Before / after
 
-Real output, unedited, from `commentreducr comments --reduce` and
-`commentreducr docstrings --reduce` on a small sample repo, default local models.
+Examples produced by the LLM reducer on a small sample repo. Classifier screening
+now selects which Python blocks reach this stage.
 
 ```diff
 --- a/orders.py
@@ -130,198 +130,145 @@ survives, restated without the "has bitten us twice" history.
 ## Install
 
 ```sh
-cargo install commentreducr
+cargo install commentreducr                 # deletion and prompt evaluation
+cargo install commentreducr --features hook # reduction, classifier and Git hook too
 ```
 
-The Python pre-push checker is an optional install:
+The optional build bundles a CPU inference runtime and SQLite. It requires no Python or
+inference server for classification. The first reduction or hook installation downloads and
+verifies the frozen 34 MB MiniLM-L12 model; subsequent classification runs offline.
+Reduction of flagged items still uses your configured OpenAI-compatible LLM endpoint.
+
+## Usage
 
 ```sh
-cargo install commentreducr --features hook
+commentreducr reduce . --scope all --language all --workers 8
+commentreducr reduce src --scope comments --language rust --workers 4
+commentreducr reduce . --scope docstrings --language python
+commentreducr delete . --scope all --language python --dry-run
+commentreducr delete . --scope comments --language typescript
+commentreducr install-git-hook
+commentreducr check --warn
 ```
 
-## Pre-push hook
+Both `--scope` and `--language` default to `all`. Scopes are `comments`, `docstrings`,
+and `all`; docstrings means Python module/class/function docstrings. Languages are
+`python`, `typescript`, `rust`, and `all`. `typescript` includes TSX; `all` also includes
+JavaScript and YAML. A path limits the run to a tracked file or directory; omitted means
+`.`. Untracked files, configured ignores, and Git ignore rules are respected. Rust UI
+fixtures with a tracked `.stderr` sibling are skipped because their snapshots pin line numbers.
 
-In each repository, run once:
+This is a breaking CLI change: the `comments` and `docstrings` subcommands and the
+`--reduce`/`--delete` mode flags are removed. Use `reduce` or `delete` with `--scope`.
+`install-hook` is now `install-git-hook`; `prepush-check` is now `check`. Run
+`install-git-hook` again to upgrade a previously installed hook and preserve its original chain.
 
-```sh
-commentreducr install-hook
+`reduce` examines every non-structural item, including single-line, trailing, inline,
+and code-like comments. Python items are screened by the frozen classifier; only FLAG
+items reach the LLM, which can retain, reduce, or delete them. Other languages go directly
+to the LLM because the classifier was trained for Python. `--workers N` bounds concurrent
+LLM requests, including requests for different items in one file. The line-count and density
+gates are gone; old `min_lines`/`min_density` config keys are ignored.
+
+`delete` removes every safely editable non-structural item in scope without a classifier
+or LLM. `--dry-run` applies to deletion only and prints proposed changes without writing.
+
+## Resume and local state
+
+Repeat the same `reduce` command after interruption. SQLite stores classifier decisions
+and each item's file, source snapshot, one-based line range, kind, progress, and disposition.
+Completed LLM verdicts are reused; failed or interrupted requests are retried. An interrupted
+request may be sent again if its response had not yet been committed locally.
+
+The default database is `commentreducr/state.sqlite` in the current worktree's Git metadata
+directory, normally `.git/commentreducr/state.sqlite`. It stays out of the source tree.
+Use `--database FILE` or the `database` config key to choose a location. `check` reuses the
+same classifier cache. Concurrent operations on a database fail promptly rather than mix work.
+
+Classifier cache keys include the frozen model/settings and the complete target plus its
+code context. LLM checkpoints also include the source snapshot, models, endpoint, and output
+settings. A source edit invalidates obsolete offsets. A completed file is skipped only while
+its output and settings still match the checkpoint.
+
+A file with unresolved items is left untouched. Successful item verdicts remain cached for
+its next attempt; other files can finish. Before applying a completed file, the tool records
+its planned rewrite, verifies the current source, validates parsing, and atomically replaces
+it. Resume handles interruption before or after replacement without applying an edit twice.
+
+For example, inspect the ledger with SQLite:
+
+```sql
+SELECT file, start_line, end_line, kind, classification, state, result_type, error
+FROM items
+ORDER BY file, start_line;
 ```
 
-This downloads and caches the 34 MB MiniLM-L12 classifier and installs an executable
-pre-push hook that runs `commentreducr prepush-check --warn`. It preserves and chains
-an existing hook. Installation is repeatable. After setup, classification runs locally
-on CPU without Python, an inference server, or network access.
+Classification values are `PASS`, `FLAG`, `DIRECT` (non-Python), or `ERROR`. Progress is
+`pending`, `in_progress`, `ready`, `kept`, `applied`, or `error`; dispositions are `keep`,
+`reduce`, `delete`, or `error`. Cached classifier probabilities are in `classifications`.
 
-```sh
-commentreducr prepush-check --warn  # print findings to stdout; exit 0
-commentreducr prepush-check         # exit 1 for findings or check errors; otherwise 0
-```
+## Git hook and checks
 
-The installed hook checks the actual commits Git is pushing, including multiple refs.
-A manual check compares HEAD with its upstream. For a new branch it uses known remote
-history; on a repository's first push every Python file is new. Working-tree edits
-are not included. Only changed Python comment/docstring blocks are classified; a
-change within a block includes that entire block. Nearby code supplies context.
-Unchanged documentation elsewhere in a changed file is skipped, as are structural
-directives, licenses, and the existing protected docstrings. The checker reports
-locations and feedback and leaves files untouched.
+`install-git-hook` installs an executable pre-push hook running `commentreducr check --warn`.
+It preserves existing hooks, their stdin/arguments, and their failure status. Installation is
+repeatable and upgrades the previous commentreducr wrapper.
 
-The model flags a whole block when any prose appears unnecessary. Comments should
-explain an unexpected reason, a non-obvious trap, or complex code. Docstrings should
-describe the consumer contract. Findings need author review, so installation uses
-warning mode. Oversized blocks and analysis errors are reported; `--warn` still exits 0.
+`check` reports changed Python comment/docstring blocks in the actual committed trees being
+pushed, including multiple refs. A manual invocation compares HEAD with its upstream; new
+branches use known remote history, and the first push checks the whole Python tree. Only
+changed blocks are classified, with the complete block and nearby code as context. Source
+files are untouched. This checker remains Python-only.
 
-The model is cached under `~/.cache/commentreducr` (`XDG_CACHE_HOME` or `LOCALAPPDATA`
-when set). For an offline setup, set `COMMENTREDUCR_MODEL_PATH` to a local copy of
-the published `models/python-hook-minilm-l12-v1/model.onnx`. The SHA-256 checksum is
-verified before use. Builds without the `hook` feature retain the usual dependencies
-and commands.
+`check --warn` prints findings and errors to stdout and exits 0. Strict `check` exits 1 for
+findings or errors, otherwise 0. Findings require author review. Oversized targets that cannot
+fit the classifier are reported for manual review rather than truncated. Reduction similarly
+leaves their file untouched and records the error.
 
-## Quick start
+The model cache defaults to `~/.cache/commentreducr` (`XDG_CACHE_HOME` or `LOCALAPPDATA` when
+set). `COMMENTREDUCR_MODEL_PATH` selects a local copy for offline setup. Its checksum is
+verified when loaded. The model weights and threshold are unchanged in this CLI migration.
 
-```sh
-commentreducr comments . --delete --dry-run   # count what --delete would remove: no LLM, no writes
-commentreducr comments . --delete             # remove every non-structural comment
-commentreducr comments .                      # --reduce (default): an LLM keeps, rewrites or deletes each dense block
-commentreducr docstrings .                    # same for Python docstrings; --delete works here too
-```
+## Preserved documentation
 
-Both subcommands only process files `git ls-files` reports as tracked, so untracked scratch
-files and anything `.gitignore`d are left alone -- and a tracked file that now matches a
-gitignore rule (force-added with `git add -f`, or ignored after it was tracked) is skipped too.
-So is a Rust UI test (a `.rs` file with a tracked `.stderr` beside it, as trybuild and ui_test
-keep): its expected compiler output pins line numbers that deleting a comment line would shift.
-The `ignore` config key adds more gitignore-syntax patterns on top of that, see below. `--delete`
-removes every non-structural comment/docstring outright, no LLM. `--reduce` (the default) is
-pickier: short, sparse or code-like blocks are left alone, and dense blocks go to a local LLM
-that replies `DELETE` or a terse replacement line. `-h` shows common flags; `--help` shows
-everything, including tuning flags.
+Structural comments survive both modes: license/SPDX text, shebangs, modelines, linter and
+formatter directives, TODO/FIXME/XXX/HACK/NOTE, JSDoc, Rust doc comments, and Rust `SAFETY:`
+comments. Structural Python docstrings also survive: doctests, module help consumed through
+`__doc__`, protected decorators, and protected base classes. Config lists extend the defaults.
 
-## What is kept
+The rubric is strict: comments need an unexpected reason, a non-obvious trap, or a shortcut
+through complex code. Docstrings explain the consumer contract. Narration, implementation
+restatements, history, caller cross-references, and unnecessary passages count as bloat even
+when the block also includes useful material. The classifier flags the whole block; the LLM
+stage decides what can survive.
 
-Structural comments are never touched by either mode: linter/type-checker directives
-(`# noqa`, `@ts-ignore`, `eslint-*`, ...), `TODO`/`FIXME`/`HACK`/`NOTE`, licenses and SPDX
-headers, shebangs, editor modelines, JSDoc blocks, Rust doc comments (`///`, `//!`, `/** */`:
-rustdoc renders them and runs their examples as doctests) and `// SAFETY:` comments (clippy's
-`undocumented_unsafe_blocks` looks for them), and language-specific pragmas. The full list is in
-[DESIGN.md](DESIGN.md).
+## Configuration
 
-For docstrings, `--delete` and `--reduce` both always keep: doctests, a module docstring in a
-file that reads `__doc__` (argparse/click render it as help text), license text, a docstring
-under a decorator matching `keep_decorators` (default `tool`, `command`, `group`: Strands
-`@tool`, click/typer commands), and a class docstring whose bases match `keep_bases` (default
-`Signature`, `BaseModel`: DSPy signatures and pydantic models, whose docstrings are prompt text
-sent to the model at runtime), including a same-file subclass of one. A config's `keep_decorators`
-and `keep_bases` lists extend the defaults, same as `ignore`. `--reduce` additionally leaves a
-docstring alone if it has fewer than `--min-lines` text lines, no LLM call needed.
-
-## What gets cut
-
-Everything else is a candidate. The rule the LLM applies is the same for both comments and
-docstrings: a comment or docstring earns its place only when it says something the code
-cannot, and it loses that place even when phrased as a warning if it is really narration,
-history, a tutorial on a library, or rationale the identifier already states.
-
-One flavor gets its own rule because it's a hygiene problem, not just noise: a comment or
-docstring that explains how *other* code uses, expects, mirrors, or must stay in sync with this
-one (see the `router.js` and `payments/validate.py` lines above) leaks a caller's concern into
-the callee and goes stale the moment either side moves, so it's deleted. When it wraps a real
-hazard, the kept line restates the hazard in this code's own terms and names no other module or
-caller. A generic precondition on any caller ("call flush() before close()", "hold the lock")
-is a contract, not a leak, and stays.
-
-For docstrings specifically, `--reduce` aims for the contract a caller needs rather than a
-story of the implementation: a test function's docstring becomes one or two lines saying what
-it guards, a test module's becomes zero to one short paragraph, everything else gets a one-line
-summary plus at most a short paragraph or Args/Returns list.
-
-## Safety
-
-None of this touches anything that is not a comment or docstring: string, raw string and
-template literals, regex literals, and JSX text are byte-for-byte untouched.
-`tools/corpus_check.py` runs `--delete` over a tree and asserts the Python AST (modulo
-docstrings), every YAML document and the Rust token stream are unchanged; it passes on the
-Python stdlib and 1266 real-world YAML files, and on 332 crates.io crates plus the Rust standard
-library (13,126 `.rs` files) it finds no change beyond plain comments. 1,665 of those files,
-mostly generated wasm-bindgen code, fail to parse and are skipped.
-
-Files that fail to parse are skipped with a warning and never written. To report one, run
-`commentreducr comments --diagnose <path>`: it parses only, touches nothing, and prints a
-redacted report (node kinds and line shapes, no paths or code) safe to paste into an issue.
-
-Output: a per-file summary line for every file with a change (`-v`/`--verbose` adds a line per
-block). The run total reports both block counts and the source lines they cover, e.g.
-`120 deleted (2340 lines), 5 reduced (60 lines saved)`. A file that fails to parse, or an LLM
-call that fails mid-run, is counted as a skip/warning and makes the exit status 1; `--reduce`
-leaves that one block unchanged rather than guessing.
-
-## LLM setup
-
-`--reduce` needs a reachable OpenAI-compatible chat endpoint (`/v1/chat/completions`) and
-checks it before touching any file. `comments` defaults to
-[Gemma 4 E2B](https://huggingface.co/mlx-community/gemma-4-e2b-it-4bit) (MLX); `docstrings`
-defaults to [Gemma 4 26B A4B](https://huggingface.co/mlx-community/gemma-4-26b-a4b-it-4bit),
-about 4x slower per request but less likely to drop the one gotcha a docstring exists to
-state. Other models run but are unmeasured. Measured 2026-09-08 on
-[oMLX](https://github.com/jundot/omlx) (Apple Silicon, which caches the prompt prefix): the
-comment prompt decides correctly 90.0% of the time on a 130-row labeled set (Gemma 4 E2B), the
-docstring prompt 92.6% on a 68-row set (Gemma 4 26B A4B). For the comment model that's about
-0.4s per request, and the default 8 workers give roughly 3.7x the throughput of one at a time.
-Because the prefix is cached, each request only has to prefill roughly 50-150 tokens plus the
-comment itself.
-
-Config file at `~/.config/commentreducr/config.toml` (or `--config FILE`); flags override the
-config file, which overrides the shipped defaults below (embedded from
-[`src/default_config.toml`](src/default_config.toml) and parsed at startup). List-valued keys
-like `ignore` are the exception to "overrides": a config file's list is appended to the shipped
-default rather than replacing it, so adding a pattern here still keeps `migrations/` ignored.
+Settings use `~/.config/commentreducr/config.toml` (`XDG_CONFIG_HOME` when set), or
+`--config FILE`. Flags override the file, which overrides these defaults. `model` supplies
+comments and is the fallback for docstrings; `docstrings_model` can override it. The `--model`
+flag overrides both for a run. List values append to the defaults.
 
 ```toml
-# Every default commentreducr ships with. Copy this into ~/.config/commentreducr/config.toml
-# (or --config FILE) and override only what you need; flags win over that file, which wins over
-# these defaults. List-valued keys like `ignore` are the exception: a config file's list is
-# appended to the shipped default, not swapped in for it.
-endpoint = "http://localhost:8000/v1"        # OpenAI-compatible base URL
-model = "gemma-4-e2b-it-4bit"                # used for comments (and docstrings if docstrings_model is unset)
-docstrings_model = "gemma-4-26b-a4b-it-4bit" # used for docstrings
-workers = 8                                   # worker threads / max in-flight LLM requests
-min_lines = 4                                 # minimum lines in a block before it's reduced
-min_density = 5.0                             # comments only: minimum average words per line
-max_words = 20                                # comments only: target max words in a summary
-ignore = ["migrations/"]   # gitignore-syntax patterns; a user config's list is appended to this one
-keep_decorators = ["tool", "command", "group"]   # docstrings under these decorators are never touched (Strands @tool, click/typer commands)
-keep_bases = ["Signature", "BaseModel"]          # class docstrings with these bases are never touched (dspy.Signature, pydantic.BaseModel)
+scope = "all"
+language = "all"
+endpoint = "http://localhost:8000/v1"
+model = "gemma-4-e2b-it-4bit"
+docstrings_model = "gemma-4-26b-a4b-it-4bit"
+workers = 8
+max_words = 20
+ignore = ["migrations/"]
+keep_decorators = ["tool", "command", "group"]
+keep_bases = ["Signature", "BaseModel"]
+# database = "/path/to/local/state.sqlite"
+# api_key = "..."
 ```
 
-Add `api_key = "sk-..."` too if your endpoint needs one; it has no default so it isn't in the
-file above. `ignore` patterns are gitignore syntax, matched with `git check-ignore` against the
-same tracked file list `git ls-files` produced (see "Quick start" above); a pattern like
-`legacy/` in your own config skips that directory on top of the shipped `migrations/`.
-
-`--delete --dry-run` counts without writing so you can preview a `--delete` run; `--dry-run`
-only applies to `--delete`. `--reduce` scans first, then shows progress on stderr (percent,
-blocks, files, time left, token counts and throughput) and prints token totals at the end. It
-has no offline fallback: if a call fails mid-run, that one block is left unchanged with a
-warning.
-
-## Development
+Malformed config is an error; a missing file uses defaults. Invalid/unreadable source files
+are skipped with a warning. Errors produce exit 1 while preserving unfinished files.
+`reduce --diagnose` parses without classification, LLM calls, or writes and emits a redacted
+parse report. Prompt evaluation bypasses classifier screening:
 
 ```sh
-cargo test
-cargo fmt --check && cargo clippy --all-targets -- -D warnings       # CI gate
-cargo run -- comments --eval tools/dataset/comments.jsonl            # score the comment prompt
-cargo run -- docstrings --eval tools/dataset/docstrings.jsonl        # score the docstring prompt
-cargo build --release && tools/corpus_check.py /usr/lib/python3.12 ~/some/repo   # never-corrupt check
+cargo run -- reduce --scope comments --eval tools/dataset/comments.jsonl
+cargo run -- reduce --scope docstrings --eval tools/dataset/docstrings.jsonl
 ```
-
-PRs only; main requires CI. Both prompts have a labeled dataset and a rubric in
-[tools/dataset](tools/dataset) (the docstring one is
-[docstring_rubric.md](tools/dataset/docstring_rubric.md)); `--eval` prints decision accuracy,
-DELETE precision/recall and token counts so a prompt change can be scored before and after.
-
-Design notes, the full structural-comment lists, the LLM verdict protocol and the token budget
-behind the prefix caching above are in [DESIGN.md](DESIGN.md).
-
-## License
-
-Apache 2.0

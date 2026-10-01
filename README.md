@@ -133,6 +133,50 @@ survives, restated without the "has bitten us twice" history.
 cargo install commentreducr
 ```
 
+The Python pre-push checker is an optional install:
+
+```sh
+cargo install commentreducr --features hook
+```
+
+## Pre-push hook
+
+In each repository, run once:
+
+```sh
+commentreducr install-hook
+```
+
+This downloads and caches the 34 MB MiniLM-L12 classifier and installs an executable
+pre-push hook that runs `commentreducr prepush-check --warn`. It preserves and chains
+an existing hook. Installation is repeatable. After setup, classification runs locally
+on CPU without Python, an inference server, or network access.
+
+```sh
+commentreducr prepush-check --warn  # print findings to stdout; exit 0
+commentreducr prepush-check         # exit 1 for findings or check errors; otherwise 0
+```
+
+The installed hook checks the actual commits Git is pushing, including multiple refs.
+A manual check compares HEAD with its upstream. For a new branch it uses known remote
+history; on a repository's first push every Python file is new. Working-tree edits
+are not included. Only changed Python comment/docstring blocks are classified; a
+change within a block includes that entire block. Nearby code supplies context.
+Unchanged documentation elsewhere in a changed file is skipped, as are structural
+directives, licenses, and the existing protected docstrings. The checker reports
+locations and feedback and leaves files untouched.
+
+The model flags a whole block when any prose appears unnecessary. Comments should
+explain an unexpected reason, a non-obvious trap, or complex code. Docstrings should
+describe the consumer contract. Findings need author review, so installation uses
+warning mode. Oversized blocks and analysis errors are reported; `--warn` still exits 0.
+
+The model is cached under `~/.cache/commentreducr` (`XDG_CACHE_HOME` or `LOCALAPPDATA`
+when set). For an offline setup, set `COMMENTREDUCR_MODEL_PATH` to a local copy of
+the published `models/python-hook-minilm-l12-v1/model.onnx`. The SHA-256 checksum is
+verified before use. Builds without the `hook` feature retain the usual dependencies
+and commands.
+
 ## Quick start
 
 ```sh

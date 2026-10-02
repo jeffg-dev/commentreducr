@@ -248,6 +248,64 @@ fn classifier_screens_short_items_and_only_flags_reach_the_llm_with_config_and_c
 }
 
 #[test]
+fn oversized_python_blocks_go_directly_to_the_llm_retry_and_resume() {
+    let repo = Repo::new();
+    let comment = format!(
+        "{}COMMENT_END",
+        "This repeats the implementation. ".repeat(100)
+    );
+    let docstring = format!(
+        "{}DOCSTRING_END",
+        "This repeats the implementation. ".repeat(100)
+    );
+    let source = format!("# {comment}\n\"\"\"{docstring}\"\"\"\nvalue = 1\n");
+    repo.write("large.py", &source);
+    let mut failures = 0;
+    let mock = Mock::new(move |r| {
+        let text = r["messages"].as_array().unwrap().last().unwrap()["content"]
+            .as_str()
+            .unwrap();
+        if text.contains("DOCSTRING_END") && failures < 2 {
+            failures += 1;
+            (500, "try later".into())
+        } else {
+            (200, "DELETE".into())
+        }
+    });
+    run(repo.command(&mock.endpoint), false);
+    assert_eq!(repo.read("large.py"), source);
+    let summary = run(repo.command(&mock.endpoint), true);
+    assert!(summary.contains("0 errors"), "{summary}");
+    assert!(summary.contains("1 verdicts cached"), "{summary}");
+    assert_eq!(repo.read("large.py"), "value = 1\n");
+    let calls = mock.actuals();
+    assert_eq!(calls.len(), 4);
+    assert_eq!(
+        calls.iter().filter(|s| s.contains("COMMENT_END")).count(),
+        1
+    );
+    assert!(calls.iter().any(|s| s.contains(&comment)));
+    assert!(calls.iter().any(|s| s.contains(&docstring)));
+    let db = repo.db();
+    let direct: i64 = db
+        .query_row(
+            "SELECT count(*) FROM items WHERE classification='DIRECT' AND state='applied'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(direct, 2);
+    let cached: i64 = db
+        .query_row("SELECT count(*) FROM classifications", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(cached, 0);
+    drop(db);
+    let summary = run(repo.command(&mock.endpoint), true);
+    assert!(summary.contains("1 files completed"), "{summary}");
+    assert_eq!(mock.actuals().len(), 4);
+}
+
+#[test]
 fn killed_run_resumes_ready_verdicts_and_does_not_apply_stale_offsets() {
     let repo = Repo::new();
     let source = "// FIRST_ITEM\nconst a = 1;\n\n// SECOND_ITEM\nconst b = 2;\n";

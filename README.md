@@ -163,9 +163,11 @@ This is a breaking CLI change: the `comments` and `docstrings` subcommands and t
 `install-git-hook` again to upgrade a previously installed hook and preserve its original chain.
 
 `reduce` examines every non-structural item, including single-line, trailing, inline,
-and code-like comments. Python items are screened by the frozen classifier; only FLAG
-items reach the LLM, which can retain, reduce, or delete them. Other languages go directly
-to the LLM because the classifier was trained for Python. `--workers N` bounds concurrent
+and code-like comments. Python items are screened by the frozen classifier; FLAG items
+and blocks too large for its 384-token limit reach the LLM, which can retain, reduce, or
+delete them. Oversized blocks bypass classifier inference and reach the LLM in full.
+Other languages go directly to the LLM because the classifier was trained for Python.
+`--workers N` bounds concurrent
 LLM requests, including requests for different items in one file. The line-count and density
 gates are gone; old `min_lines`/`min_density` config keys are ignored.
 
@@ -202,8 +204,8 @@ FROM items
 ORDER BY file, start_line;
 ```
 
-Classification values are `PASS`, `FLAG`, `DIRECT` (non-Python), or `ERROR`. Progress is
-`pending`, `in_progress`, `ready`, `kept`, `applied`, or `error`; dispositions are `keep`,
+Classification values are `PASS`, `FLAG`, `DIRECT` (non-Python or oversized), or `ERROR`.
+Progress is `pending`, `in_progress`, `ready`, `kept`, `applied`, or `error`; dispositions are `keep`,
 `reduce`, `delete`, or `error`. Cached classifier probabilities are in `classifications`.
 
 ## Git hook and checks
@@ -220,8 +222,8 @@ files are untouched. This checker remains Python-only.
 
 `check --warn` prints findings and errors to stdout and exits 0. Strict `check` exits 1 for
 findings or errors, otherwise 0. Findings require author review. Oversized targets that cannot
-fit the classifier are reported for manual review rather than truncated. Reduction similarly
-leaves their file untouched and records the error.
+fit the classifier are reported for manual review rather than truncated. `reduce` sends
+these blocks directly to the LLM.
 
 The model cache defaults to `~/.cache/commentreducr` (`XDG_CACHE_HOME` or `LOCALAPPDATA` when
 set). `COMMENTREDUCR_MODEL_PATH` selects a local copy for offline setup. Its checksum is

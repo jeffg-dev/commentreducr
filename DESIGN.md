@@ -9,8 +9,8 @@ comments (Python, JS/TS, YAML, Rust) and Python docstrings (module, class, funct
 ## CLI and selection
 
 `reduce [path] --scope comments|docstrings|all --language python|typescript|rust|all --workers N`
-classifies every non-structural Python item and sends flagged items to the LLM. Other supported
-languages bypass the Python-only classifier and go directly to the LLM. `delete` uses the same
+classifies every non-structural Python item and sends flagged or oversized items to the LLM.
+Other supported languages bypass the Python-only classifier and go directly to the LLM. `delete` uses the same
 scope/language selection and removes all safely editable non-structural items without inference.
 TypeScript includes TSX; all also includes JavaScript and YAML. There are no line-count, density,
 trailing-comment, or code-like gates. Every build includes local classifier inference and SQLite.
@@ -30,9 +30,11 @@ also support config keys. Paths preserve symlinks for the planner to reject befo
 `plan_file` reads one source snapshot and collects comment blocks and Python docstrings together,
 preserving structural items. MiniLM-L12 receives the same frozen kind/text/context pair as the
 hook. All Python targets are screened, including short and inline blocks. Oversized targets
-are errors requiring manual review. `state::Database` stores input-keyed PASS/FLAG probabilities
-and item records with file, source hash, byte/line range, kind, classification, state, disposition,
-replacement edit, and errors. Non-Python classifications are DIRECT.
+bypass classifier inference and go directly to the LLM with their complete text.
+`state::Database` stores input-keyed PASS/FLAG probabilities and item records with file, source
+hash, byte/line range, kind, classification, state, disposition,
+replacement edit, and errors. Non-Python and oversized classifications are DIRECT; bypasses
+do not store a classifier probability. `check` still reports oversized targets for manual review.
 
 ONNX Runtime uses x64 quantization precision mode to avoid saturated matrix products on CPUs
 without VNNI. The frozen classifier settings include this mode so caches and checkpoints invalidate.
@@ -127,7 +129,7 @@ contract, not a leak. The docstring prompt applies the same rule. So the model d
 "summarize": it replies either `DELETE` or one terse line (<= max_words). `llm::Verdict` carries
 that; reduce mode deletes the block on `DELETE`. The system prompt states the rubric and sixteen
 few-shot demos (both languages, majority DELETE) are sent as prior user/assistant turns.
-Only classifier-flagged Python targets and all non-Python targets reach the LLM. The prompts
+Classifier-flagged or oversized Python targets and all non-Python targets reach the LLM. The prompts
 and demos are unchanged. Inline/trailing comment replacement stays inside the comment's byte
 range; own-line replacements keep their original indentation and terminators. Unsafe replies
 and parse failures leave the whole file untouched. `--dry-run` applies to `delete` only.
@@ -148,8 +150,8 @@ tokens); a one-row dataset with a tiny comment gives the prefix size directly.
 
 If you edit the prompt or demos, keep the prefix just above a 512 boundary. Compressing the
 taxonomy wording was tried and cost ~8 points of accuracy; adding demos to reach the next
-boundary is the better lever. Prose sent to the model is capped at 150 words and the context
-line at 80 chars.
+boundary is the better lever. Complete comment and docstring text is sent to the model; the
+comment context line is capped at 80 chars.
 
 ## LLM endpoint
 

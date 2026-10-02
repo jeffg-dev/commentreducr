@@ -1,26 +1,20 @@
 pub mod docstring;
 pub mod eval;
 pub mod files;
-#[cfg(feature = "hook")]
 pub mod hook_git;
-#[cfg(feature = "hook")]
 pub mod hook_model;
 pub mod llm;
 pub mod parse;
 pub mod progress;
 pub mod prose;
-#[cfg(feature = "hook")]
 mod reduction;
 pub mod rewrite;
-#[cfg(feature = "hook")]
 pub mod state;
 pub mod structural;
 pub mod types;
 
 use anyhow::{Context, Result, ensure};
-#[cfg(feature = "hook")]
-use docstring::DocKind;
-use docstring::Docstring;
+use docstring::{DocKind, Docstring};
 use progress::Progress;
 use rewrite::Edit;
 use std::panic::AssertUnwindSafe;
@@ -120,7 +114,6 @@ impl Item {
         }
     }
 
-    #[cfg(feature = "hook")]
     fn kind(&self) -> &'static str {
         match self {
             Self::Comment(_) => "comment",
@@ -133,7 +126,6 @@ impl Item {
         }
     }
 
-    #[cfg(feature = "hook")]
     fn text(&self) -> String {
         match self {
             Self::Comment(b) => b
@@ -146,7 +138,6 @@ impl Item {
         }
     }
 
-    #[cfg(feature = "hook")]
     fn reduce(
         &self,
         source: &str,
@@ -257,12 +248,7 @@ pub fn run(root: &Path, cfg: &Config) -> Result<Stats> {
         tracked.retain(|(_, lang)| *lang == Language::Python);
     }
     if cfg.mode == Mode::Reduce {
-        #[cfg(feature = "hook")]
         return reduction::run(root, tracked, cfg);
-        #[cfg(not(feature = "hook"))]
-        anyhow::bail!(
-            "reduce requires the optional classifier: cargo install commentreducr --features hook"
-        );
     }
     let progress = Progress::silent();
     let mut stats = Stats {

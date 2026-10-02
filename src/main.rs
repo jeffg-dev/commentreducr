@@ -30,14 +30,11 @@ enum Command {
     #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
     Delete(Opts),
     /// Install a warning-only pre-push hook and prepare the local classifier
-    #[cfg(feature = "hook")]
     InstallGitHook,
     /// Check changed Python documentation in commits being pushed
-    #[cfg(feature = "hook")]
     Check(HookOpts),
 }
 
-#[cfg(feature = "hook")]
 #[derive(clap::Args, Debug)]
 struct HookOpts {
     /// Print findings and check errors to stdout, and always exit successfully
@@ -55,7 +52,6 @@ struct HookOpts {
     remote_location: Option<String>,
 }
 
-#[cfg(feature = "hook")]
 fn install_hook() -> Result<()> {
     let directory = std::env::current_dir()?;
     let status = std::process::Command::new("git")
@@ -72,7 +68,6 @@ fn install_hook() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "hook")]
 fn prepush_check(opts: &HookOpts) -> Result<()> {
     let result = (|| -> Result<bool> {
         let defaults = embedded_defaults();
@@ -544,9 +539,7 @@ fn main() -> Result<()> {
     let (mode, opts) = match &cli.command {
         Command::Reduce(o) => (Mode::Reduce, o),
         Command::Delete(o) => (Mode::Delete, o),
-        #[cfg(feature = "hook")]
         Command::InstallGitHook => return install_hook(),
-        #[cfg(feature = "hook")]
         Command::Check(opts) => return prepush_check(opts),
     };
     anyhow::ensure!(

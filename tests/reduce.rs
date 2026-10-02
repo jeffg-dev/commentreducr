@@ -1,13 +1,14 @@
-#![cfg(feature = "hook")]
 use rusqlite::Connection;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
+
+static REPO_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct Repo(PathBuf);
 impl Repo {
@@ -15,10 +16,7 @@ impl Repo {
         let dir = std::env::temp_dir().join(format!(
             "commentreducr-reduce-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            REPO_COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir(&dir).unwrap();
         let repo = Self(dir.canonicalize().unwrap());

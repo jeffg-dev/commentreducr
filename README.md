@@ -130,11 +130,10 @@ survives, restated without the "has bitten us twice" history.
 ## Install
 
 ```sh
-cargo install commentreducr                 # deletion and prompt evaluation
-cargo install commentreducr --features hook # reduction, classifier and Git hook too
+cargo install commentreducr
 ```
 
-The optional build bundles a CPU inference runtime and SQLite. It requires no Python or
+Every build bundles a CPU inference runtime and SQLite. It requires no Python or
 inference server for classification. The first reduction or hook installation downloads and
 verifies the frozen 34 MB MiniLM-L12 model; subsequent classification runs offline.
 Reduction of flagged items still uses your configured OpenAI-compatible LLM endpoint.

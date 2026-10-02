@@ -1,5 +1,3 @@
-#![cfg(feature = "hook")]
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};

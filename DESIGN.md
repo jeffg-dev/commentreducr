@@ -13,8 +13,7 @@ classifies every non-structural Python item and sends flagged items to the LLM. 
 languages bypass the Python-only classifier and go directly to the LLM. `delete` uses the same
 scope/language selection and removes all safely editable non-structural items without inference.
 TypeScript includes TSX; all also includes JavaScript and YAML. There are no line-count, density,
-trailing-comment, or code-like gates. The `hook` Cargo feature supplies inference and SQLite;
-the basic build supports deletion and prompt eval without those dependencies.
+trailing-comment, or code-like gates. Every build includes local classifier inference and SQLite.
 
 `install-git-hook` installs/upgrades the warning-only pre-push wrapper. `check [--warn]` checks
 changed committed Python blocks, with whole surviving blocks selected when an interior deletion

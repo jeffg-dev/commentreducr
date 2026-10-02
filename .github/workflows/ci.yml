@@ -23,10 +23,3 @@ jobs:
         with:
           name: commentreducr-macos-arm64
           path: target/release/commentreducr
-      - run: cargo clippy --all-targets --features hook -- -D warnings
-      - run: cargo test --features hook
-      - run: cargo build --release --features hook
-      - uses: actions/upload-artifact@v4
-        with:
-          name: commentreducr-hook-macos-arm64
-          path: target/release/commentreducr

@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "commentreducr"
-version = "0.11.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",

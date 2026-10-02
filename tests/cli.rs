@@ -859,14 +859,3 @@ fn language_and_scope_filters_combine_and_flags_override_config() {
     .success();
     assert_eq!(read(dir.path(), "item.py"), "def f():\n    return 1\n");
 }
-
-#[cfg(not(feature = "hook"))]
-#[test]
-fn reduce_without_optional_feature_explains_install_and_leaves_files_intact() {
-    let dir = setup_repo();
-    let before = snapshot(dir.path());
-    run(commentreducr().arg("reduce").arg(dir.path()))
-        .failure()
-        .stderr_contains("cargo install commentreducr --features hook");
-    assert_eq!(snapshot(dir.path()), before);
-}

@@ -1,6 +1,6 @@
 # Python documentation classifier
 
-This is the frozen INT8 MiniLM-L12 model used by the optional `hook` feature.
+This is the frozen INT8 MiniLM-L12 model used by reduction and the Git hook in every build.
 It predicts PASS or FLAG for an entire Python comment/docstring block. Any
 unnecessary passage makes the block FLAG. Comments need an unexpected reason,
 a non-obvious trap, or a shortcut through complex code. Docstrings describe the

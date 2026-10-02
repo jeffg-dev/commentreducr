@@ -1,6 +1,6 @@
 use crate::{
     Config, FileResult, Item, Language, Plan, Stats,
-    hook_model::Classifier,
+    hook_model::{BlockTooLarge, Classifier},
     llm::LlmClient,
     parallel, plan_file,
     progress::Progress,
@@ -102,16 +102,13 @@ pub(crate) fn run(root: &Path, tracked: Vec<(PathBuf, Language)>, cfg: &Config) 
                     }
                     stats.screened += 1;
                     let classifier = classifier.as_mut().unwrap();
-                    classifier
-                        .probability(item.kind(), &text, &context)
-                        .and_then(|p| {
-                            let flag = database.remember_classification(
-                                &key,
-                                p,
-                                classifier.threshold(),
-                            )?;
-                            Ok((flag, if flag { "FLAG" } else { "PASS" }))
-                        })
+                    match classifier.probability(item.kind(), &text, &context) {
+                        Ok(p) => database
+                            .remember_classification(&key, p, classifier.threshold())
+                            .map(|flag| (flag, if flag { "FLAG" } else { "PASS" })),
+                        Err(error) if error.is::<BlockTooLarge>() => Ok((true, "DIRECT")),
+                        Err(error) => Err(error),
+                    }
                 };
                 let classification = decision.as_ref().map_or("ERROR", |d| d.1);
                 let record = database.item(&ItemRecord {

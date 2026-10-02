@@ -193,12 +193,10 @@ const DEMOS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// Bound what we send: traps are stated early, and long blocks are mostly story.
-const MAX_PROSE_WORDS: usize = 150;
 const MAX_CONTEXT_CHARS: usize = 80;
 
 fn user_message(prose: &str, context: &str) -> String {
-    let prose: Vec<&str> = prose.split_whitespace().take(MAX_PROSE_WORDS).collect();
+    let prose: Vec<&str> = prose.split_whitespace().collect();
     let mut m = format!("Comment:\n{}", prose.join(" "));
     if !context.is_empty() {
         let ctx: String = context.chars().take(MAX_CONTEXT_CHARS).collect();
@@ -438,9 +436,6 @@ const DOC_DEMOS: &[(&str, &str, &str, bool, bool, &str, &[&str], usize, &str)] =
     ),
 ];
 
-/// Docstrings start with the summary, so truncating the tail costs little.
-const MAX_DOC_WORDS: usize = 250;
-
 fn doc_user_message(req: &DocRequest) -> String {
     let mut m = format!("Kind: {}", req.kind);
     if !req.name.is_empty() {
@@ -464,7 +459,7 @@ fn doc_user_message(req: &DocRequest) -> String {
         m.push('\n');
         m.push_str(&req.body_preview.join("\n"));
     }
-    let words: Vec<&str> = req.text.split_whitespace().take(MAX_DOC_WORDS).collect();
+    let words: Vec<&str> = req.text.split_whitespace().collect();
     m.push_str(&format!("\n\nDocstring:\n{}", words.join(" ")));
     m
 }

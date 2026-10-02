@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use ort::{
     session::{Session, builder::GraphOptimizationLevel},
     value::Tensor,
@@ -21,6 +21,21 @@ struct ModelConfig {
     max_length: usize,
     x64_quant_precision: String,
 }
+
+#[derive(Debug)]
+pub(crate) struct BlockTooLarge(usize);
+
+impl std::fmt::Display for BlockTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "block exceeds the model's {}-token limit; review it manually",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for BlockTooLarge {}
 
 pub fn model_path() -> Result<PathBuf> {
     if let Some(path) = std::env::var_os("COMMENTREDUCR_MODEL_PATH") {
@@ -133,10 +148,7 @@ impl Classifier {
             .encode(target.as_str(), false)
             .map_err(|e| anyhow!("{e}"))?;
         if target_tokens.len() + 3 >= self.config.max_length {
-            bail!(
-                "block exceeds the model's {}-token limit; review it manually",
-                self.config.max_length
-            );
+            return Err(BlockTooLarge(self.config.max_length).into());
         }
         self.tokenizer
             .with_truncation(Some(TruncationParams {
@@ -232,7 +244,8 @@ mod tests {
         assert!(
             classifier
                 .probability("comment", &"word ".repeat(500), "pass")
-                .is_err()
+                .unwrap_err()
+                .is::<BlockTooLarge>()
         );
     }
 }

@@ -1,6 +1,7 @@
 {
   "threshold": 0.9450385272502899,
   "max_length": 384,
+  "x64_quant_precision": "1",
   "inference_batch_size": 1,
   "labels": [
     "PASS",

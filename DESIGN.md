@@ -34,6 +34,9 @@ are errors requiring manual review. `state::Database` stores input-keyed PASS/FL
 and item records with file, source hash, byte/line range, kind, classification, state, disposition,
 replacement edit, and errors. Non-Python classifications are DIRECT.
 
+ONNX Runtime uses x64 quantization precision mode to avoid saturated matrix products on CPUs
+without VNNI. The frozen classifier settings include this mode so caches and checkpoints invalidate.
+
 The default SQLite database is in the current worktree's Git metadata directory at
 `commentreducr/state.sqlite`; `--database` or config `database` overrides it. SQLite uses WAL
 and synchronous FULL; a file lock prevents concurrent runs on one database. Classifier keys

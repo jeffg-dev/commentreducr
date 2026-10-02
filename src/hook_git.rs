@@ -980,7 +980,9 @@ mod tests {
         );
         let stdin = "refs/heads/main abc refs/heads/main def\n";
         let run = |status: &str| {
-            let mut child = Command::new(&installed)
+            // Parallel test subprocesses can briefly inherit a write descriptor on Linux.
+            let mut child = Command::new("sh")
+                .arg(&installed)
                 .args(["origin", "remote path"])
                 .env("PATH", &path)
                 .env("ORIGINAL_STATUS", status)

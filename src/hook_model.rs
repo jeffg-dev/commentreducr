@@ -19,6 +19,7 @@ const CONFIG: &str = include_str!("model/minilm-l12-classifier.json");
 struct ModelConfig {
     threshold: f64,
     max_length: usize,
+    x64_quant_precision: String,
 }
 
 pub fn model_path() -> Result<PathBuf> {
@@ -93,7 +94,7 @@ impl Classifier {
         let bytes =
             std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
         verify(&bytes)?;
-        let config = serde_json::from_str(CONFIG)?;
+        let config: ModelConfig = serde_json::from_str(CONFIG)?;
         let mut tokenizer = Tokenizer::from_bytes(TOKENIZER).map_err(|e| anyhow!("{e}"))?;
         tokenizer.with_padding(None);
         tokenizer
@@ -103,6 +104,8 @@ impl Classifier {
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| anyhow!("{e}"))?
+            // Avoid saturating U8S8 matrix multiplication on x86 CPUs without VNNI.
+            .with_config_entry("session.x64quantprecision", &config.x64_quant_precision)?
             .with_intra_threads(4)
             .map_err(|e| anyhow!("{e}"))?
             .with_inter_threads(1)

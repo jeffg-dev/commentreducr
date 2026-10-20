@@ -1,0 +1,69 @@
+language: python  comment_kind: inline  placement: before_statement
+
+comment:
+# hold the lock: the refresher thread writes _cache
+
+annotated_code:
+not_in_scope()
+
+foo()
+bar()
+
+symbol: Cache.set  public: True  is_test: False
+
+enclosing_scope:
+...
+    x177 = 177
+    x178 = 178
+    x179 = 179
+    x180 = 180
+    x181 = 181
+    x182 = 182
+    x183 = 183
+    x184 = 184
+    x185 = 185
+    x186 = 186
+    x187 = 187
+    x188 = 188
+    x189 = 189
+    x190 = 190
+    x191 = 191
+    x192 = 192
+    x193 = 193
+    x194 = 194
+    x195 = 195
+    x196 = 196
+    x197 = 197
+    x198 = 198
+    x199 = 199
+    with self._lock:
+        self._cache[k] = v
+    y0 = 0
+    y1 = 1
+    y2 = 2
+    y3 = 3
+    y4 = 4
+    y5 = 5
+    y6 = 6
+    y7 = 7
+    y8 = 8
+    y9 = 9
+    y10 = 10
+    y11 = 11
+    y12 = 12
+    y13 = 13
+    y14 = 14
+    y15 = 15
+    y16 = 16
+    y17 = 17
+    y18 = 18
+    y19 = 19
+    y20 = 20
+    y21 = 21
+    y22 = 22
+    y23 = 23
+    y24 = 24
+    y25 = 25
+    y26 = 26
+    y27 = 27
+...

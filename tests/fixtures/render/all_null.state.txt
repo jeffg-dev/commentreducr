@@ -1,0 +1,11 @@
+language: None  comment_kind: None  placement: None
+
+comment:
+# x
+
+annotated_code:
+
+
+symbol: None  public: None  is_test: None
+
+enclosing_scope:

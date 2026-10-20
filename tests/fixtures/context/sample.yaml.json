@@ -1,0 +1,110 @@
+[
+  {
+    "language": "yaml",
+    "comment_kind": "directive",
+    "placement": "module_head",
+    "comment": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json",
+    "annotated_code": "name: sample-pipeline\nversion: 1\n\n# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small config without needing a templating engine.\nstats:\n  marker: \"# not a comment\"\n  weird: a#b\n  # TODO: keep me\n  # yamllint disable-line rule:line-length\n  count: 5  # noqa\n\ndefaults: &defaults\n  retries: 3\n  timeout: 30\n\njobs:",
+    "annotated_lines": [
+      4,
+      23
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "\nname: sample-pipeline\nversion: 1\n\n# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small config without needing a templating engine.\nstats:\n  marker: \"# not a comment\"\n  weird: a#b\n  # TODO: keep me\n  # yamllint disable-line rule:line-length\n  count: 5  # noqa\n\ndefaults: &defaults\n  retries: 3\n  timeout: 30\n\njobs:\n  build:\n    <<: *defaults\n    divisor: 2  # trailing remark about the divisor\n    run: |\n      echo \"starting build\"\n      # not a comment\n      exit 0\n\n# init\nextra: true\n---\nsecond_doc: true\nvalues:\n  - 1\n  - 2",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "yaml",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small config without needing a templating engine.",
+    "annotated_code": "stats:\n  marker: \"# not a comment\"\n  weird: a#b\n  # TODO: keep me\n  # yamllint disable-line rule:line-length\n  count: 5  # noqa",
+    "annotated_lines": [
+      12,
+      17
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\n\nname: sample-pipeline\nversion: 1\n\nstats:\n  marker: \"# not a comment\"\n  weird: a#b\n  # TODO: keep me\n  # yamllint disable-line rule:line-length\n  count: 5  # noqa\n\ndefaults: &defaults\n  retries: 3\n  timeout: 30\n\njobs:\n  build:\n    <<: *defaults\n    divisor: 2  # trailing remark about the divisor\n    run: |\n      echo \"starting build\"\n      # not a comment\n      exit 0\n\n# init\nextra: true\n---\nsecond_doc: true\nvalues:\n  - 1\n  - 2",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "yaml",
+    "comment_kind": "todo",
+    "placement": "before_statement",
+    "comment": "# TODO: keep me\n# yamllint disable-line rule:line-length",
+    "annotated_code": "  count: 5  # noqa",
+    "annotated_lines": [
+      17,
+      17
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\n\nname: sample-pipeline\nversion: 1\n\n# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small config without needing a templating engine.\nstats:\n  marker: \"# not a comment\"\n  weird: a#b\n  count: 5  # noqa\n\ndefaults: &defaults\n  retries: 3\n  timeout: 30\n\njobs:\n  build:\n    <<: *defaults\n    divisor: 2  # trailing remark about the divisor\n    run: |\n      echo \"starting build\"\n      # not a comment\n      exit 0\n\n# init\nextra: true\n---\nsecond_doc: true\nvalues:\n  - 1\n  - 2",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "yaml",
+    "comment_kind": "directive",
+    "placement": "trailing",
+    "comment": "# noqa",
+    "annotated_code": "  count: 5  ",
+    "annotated_lines": [
+      17,
+      17
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\n\nname: sample-pipeline\nversion: 1\n\n# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small config without needing a templating engine.\nstats:\n  marker: \"# not a comment\"\n  weird: a#b\n  # TODO: keep me\n  # yamllint disable-line rule:line-length\n  count: 5  \n\ndefaults: &defaults\n  retries: 3\n  timeout: 30\n\njobs:\n  build:\n    <<: *defaults\n    divisor: 2  # trailing remark about the divisor\n    run: |\n      echo \"starting build\"\n      # not a comment\n      exit 0\n\n# init\nextra: true\n---\nsecond_doc: true\nvalues:\n  - 1\n  - 2",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "yaml",
+    "comment_kind": "inline",
+    "placement": "trailing",
+    "comment": "# trailing remark about the divisor",
+    "annotated_code": "    divisor: 2  ",
+    "annotated_lines": [
+      26,
+      26
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\n\nname: sample-pipeline\nversion: 1\n\n# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small config without needing a templating engine.\nstats:\n  marker: \"# not a comment\"\n  weird: a#b\n  # TODO: keep me\n  # yamllint disable-line rule:line-length\n  count: 5  # noqa\n\ndefaults: &defaults\n  retries: 3\n  timeout: 30\n\njobs:\n  build:\n    <<: *defaults\n    divisor: 2  \n    run: |\n      echo \"starting build\"\n      # not a comment\n      exit 0\n\n# init\nextra: true\n---\nsecond_doc: true\nvalues:\n  - 1\n  - 2",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "yaml",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "# init",
+    "annotated_code": "extra: true",
+    "annotated_lines": [
+      33,
+      33
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json\n\nname: sample-pipeline\nversion: 1\n\n# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small config without needing a templating engine.\nstats:\n  marker: \"# not a comment\"\n  weird: a#b\n  # TODO: keep me\n  # yamllint disable-line rule:line-length\n  count: 5  # noqa\n\ndefaults: &defaults\n  retries: 3\n  timeout: 30\n\njobs:\n  build:\n    <<: *defaults\n    divisor: 2  # trailing remark about the divisor\n    run: |\n      echo \"starting build\"\n      # not a comment\n      exit 0\n\nextra: true\n---\nsecond_doc: true\nvalues:\n  - 1\n  - 2",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  }
+]

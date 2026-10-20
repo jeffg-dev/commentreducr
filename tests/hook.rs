@@ -1,3 +1,5 @@
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +20,11 @@ impl Repo {
         repo.git(&["init", "-q", "-b", "main"]);
         repo.git(&["config", "user.name", "Hook Test"]);
         repo.git(&["config", "user.email", "hook@example.invalid"]);
+        // A private config dir, so the user's own config never leaks in; these tests cover the
+        // classifier (legacy) path unless they pass --config.
+        let config = repo.0.join("xdg/commentreducr");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("config.toml"), "judge = \"legacy\"\n").unwrap();
         repo
     }
 
@@ -46,6 +53,7 @@ impl Repo {
         Command::new(env!("CARGO_BIN_EXE_commentreducr"))
             .args(args)
             .env("COMMENTREDUCR_MODEL_PATH", model_path())
+            .env("XDG_CONFIG_HOME", self.0.join("xdg"))
             .current_dir(&self.0)
             .output()
             .unwrap()
@@ -88,6 +96,10 @@ fn warnings_findings_and_errors_exit_zero_while_strict_checks_fail() {
         "{stdout}"
     );
     assert!(warning.stderr.is_empty());
+    let json = repo.cli(&["check", "--warn", "--format", "json"]);
+    let json: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(json[0]["verdict"], "bloat", "{json}");
+    assert_eq!(json[0]["checks"][0]["name"], "classifier", "{json}");
     let strict = repo.cli(&["check"]);
     assert_eq!(strict.status.code(), Some(1));
     assert_eq!(
@@ -142,6 +154,7 @@ fn installed_hook_reports_real_push_without_blocking_or_reading_dirty_files() {
         .args(["push", "origin", "main"])
         .env("PATH", std::env::join_paths(paths).unwrap())
         .env("COMMENTREDUCR_MODEL_PATH", model_path())
+        .env("XDG_CONFIG_HOME", repo.0.join("xdg"))
         .current_dir(&repo.0)
         .output()
         .unwrap();
@@ -162,4 +175,99 @@ fn installed_hook_reports_real_push_without_blocking_or_reading_dirty_files() {
         .unwrap();
     assert!(actual.status.success());
     assert_eq!(String::from_utf8(actual.stdout).unwrap().trim(), pushed);
+}
+
+#[test]
+fn judge_path_checks_every_language_and_writes_sarif_without_touching_files() {
+    let repo = Repo::new();
+    std::fs::write(repo.0.join("value.ts"), "const value = 1;\n").unwrap();
+    repo.git(&["add", "value.ts"]);
+    let base = repo.commit(SOURCE);
+    std::fs::write(
+        repo.0.join("value.ts"),
+        "// Set the value.\nconst value = 1;\n",
+    )
+    .unwrap();
+    repo.git(&["add", "value.ts"]);
+    let head = repo.commit(&bloated_source());
+    let dirty = "not valid Python (\n";
+    std::fs::write(repo.0.join("cues.py"), dirty).unwrap();
+    let mock = common::Mock::new(|_| {
+        let answers = serde_json::json!({"answers": {
+            "g1_contradicts": {"type": "noul", "noul": 0.0},
+            "c2_info_gain": {"type": "score", "probabilities": {"0": 1.0}},
+            "verdict": {"type": "choice", "probabilities": {"delete": 1.0}},
+        }});
+        (200, answers.to_string())
+    });
+    let config = repo.0.join("judge.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "judge = \"systemone\"\nendpoint = \"{}\"\nmodel = \"mock\"\nworkers = 1\n",
+            mock.endpoint
+        ),
+    )
+    .unwrap();
+    let range = format!("{base}..{head}");
+    let config = config.to_str().unwrap();
+    let args = [
+        "check",
+        "--config",
+        config,
+        "--changed",
+        &range,
+        "--format",
+        "sarif",
+    ];
+    for (warn, code) in [(false, 1), (true, 0)] {
+        let mut args = args.to_vec();
+        if warn {
+            args.push("--warn");
+        }
+        let out = repo.cli(&args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(code), "{stderr}");
+        let sarif: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let mut uris: Vec<_> = sarif["runs"][0]["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| {
+                r["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        uris.sort();
+        assert_eq!(uris, ["cues.py", "value.ts"], "{stderr}");
+        assert!(stderr.contains("2 findings"), "{stderr}");
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.0.join("cues.py")).unwrap(),
+        dirty
+    );
+    // A clean file proves report-only too: a write run would delete this flagged comment.
+    assert_eq!(
+        std::fs::read_to_string(repo.0.join("value.ts")).unwrap(),
+        "// Set the value.\nconst value = 1;\n"
+    );
+    assert!(mock.paths().iter().any(|p| p == "/v1/systemone"));
+    let out = repo.cli(&[
+        "check",
+        "--config",
+        config,
+        "--changed",
+        &range,
+        "--format",
+        "json",
+        "--output",
+        "out.json",
+        "--warn",
+    ]);
+    assert!(out.status.success() && out.stdout.is_empty());
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(repo.0.join("out.json")).unwrap()).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 2, "{json}");
 }

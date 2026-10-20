@@ -135,8 +135,17 @@ pub fn delete_edit(src: &str, block: &CommentBlock) -> Edit {
     }
 }
 
-/// Edit that replaces an own-line block with `{indent}{prefix} {summary}` plus the file's line
-/// terminator (CRLF preserved).
+/// `reduce_edit` for generator text, which may be several lines. None when it cannot be written
+/// back safely: several lines where code shares the line, or a line break or `*/` inside a line.
+pub fn replace_edit(src: &str, block: &CommentBlock, lang: Language, text: &str) -> Option<Edit> {
+    let multi = text.lines().count() > 1;
+    let unsafe_text = text.contains(['\r', '\u{2028}', '\u{2029}']) || text.contains("*/");
+    (!unsafe_text && !(multi && (!block.own_line || block.code_after)))
+        .then(|| reduce_edit(src, block, lang, text))
+}
+
+/// Edit that replaces an own-line block with `{indent}{prefix} {line}` per line of `summary`,
+/// each with the file's line terminator (CRLF preserved).
 pub fn reduce_edit(src: &str, block: &CommentBlock, lang: Language, summary: &str) -> Edit {
     if !block.own_line || block.code_after {
         return Edit {
@@ -157,7 +166,15 @@ pub fn reduce_edit(src: &str, block: &CommentBlock, lang: Language, summary: &st
 
     let eol = if had_terminator { eol_of(src) } else { "" };
     let prefix = lang.line_prefix();
-    let replacement = format!("{}{} {}{}", block.indent, prefix, summary, eol);
+    let lines: Vec<String> = summary
+        .lines()
+        .map(|l| {
+            format!("{}{} {}", block.indent, prefix, l)
+                .trim_end()
+                .to_string()
+        })
+        .collect();
+    let replacement = format!("{}{}", lines.join(eol_of(src)), eol);
 
     Edit {
         start,
@@ -307,6 +324,25 @@ mod tests {
         let edit = reduce_edit(src, &b, Language::JavaScript, "does the thing");
         let out = apply(src, vec![edit]);
         assert_eq!(out, "fn f() {\n    // does the thing\n    do_thing();\n}\n");
+    }
+
+    #[test]
+    fn multi_line_replacement_only_on_own_line_blocks() {
+        let src = "if x:\r\n    # one\r\n    # two\r\n    y()\r\n";
+        let start = src.find("# one").unwrap();
+        let end = src.find("# two").unwrap() + "# two".len();
+        let b = block(src, start, end, true, false);
+        let e = replace_edit(src, &b, Language::Python, "a\n\nb").unwrap();
+        assert_eq!(
+            apply(src, vec![e]),
+            "if x:\r\n    # a\r\n    #\r\n    # b\r\n    y()\r\n"
+        );
+        assert!(replace_edit(src, &b, Language::Python, "a */ b").is_none());
+        let src = "y() # one\n";
+        let b = block(src, 4, 9, false, false);
+        assert!(replace_edit(src, &b, Language::Python, "a\nb").is_none());
+        let e = replace_edit(src, &b, Language::Python, "a").unwrap();
+        assert_eq!(apply(src, vec![e]), "y() # a\n");
     }
 
     #[test]

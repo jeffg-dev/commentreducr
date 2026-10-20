@@ -1,0 +1,119 @@
+[
+  {
+    "language": "tsx",
+    "comment_kind": "directive",
+    "placement": "module_head",
+    "comment": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT",
+    "annotated_code": "import * as React from \"react\";\n\n/**\n * Renders a small stats summary panel.\n */\nexport function StatsPanel(props: { samples: number[] }): JSX.Element {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // @ts-ignore\n    const legacy: any = pattern.test(template);\n    for (const value of props.samples) {",
+    "annotated_lines": [
+      3,
+      22
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "\nimport * as React from \"react\";\n\n/**\n * Renders a small stats summary panel.\n */\nexport function StatsPanel(props: { samples: number[] }): JSX.Element {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // @ts-ignore\n    const legacy: any = pattern.test(template);\n    for (const value of props.samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return (\n        <div>\n            <span>Path notation uses // as a separator, not a comment</span>\n            <p>{legacy ? \"legacy\" : \"modern\"}: mean={mean}, variance={variance}</p>\n        </div>\n    );\n}\n\n// init\nconsole.log(StatsPanel);",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "tsx",
+    "comment_kind": "api_doc",
+    "placement": "function_head",
+    "comment": "/**\n * Renders a small stats summary panel.\n */",
+    "annotated_code": "export function StatsPanel(props: { samples: number[] }): JSX.Element {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;",
+    "annotated_lines": [
+      8,
+      18
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT\n\nimport * as React from \"react\";\n\nexport function StatsPanel(props: { samples: number[] }): JSX.Element {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // @ts-ignore\n    const legacy: any = pattern.test(template);\n    for (const value of props.samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return (\n        <div>\n            <span>Path notation uses // as a separator, not a comment</span>\n            <p>{legacy ? \"legacy\" : \"modern\"}: mean={mean}, variance={variance}</p>\n        </div>\n    );\n}\n\n// init\nconsole.log(StatsPanel);",
+    "symbol": {
+      "name": "StatsPanel",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "tsx",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "// This function walks the list of samples and computes a running mean and\n// a running variance using a numerically stable single-pass algorithm so\n// that we never have to keep the whole sample list around in memory. It\n// is deliberately written without any external dependencies so that it\n// can be dropped into any small script without pulling in a math library.",
+    "annotated_code": "    let count = 0;",
+    "annotated_lines": [
+      14,
+      14
+    ],
+    "scope_lines": [
+      8,
+      35
+    ],
+    "enclosing_scope": "export function StatsPanel(props: { samples: number[] }): JSX.Element {\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // @ts-ignore\n    const legacy: any = pattern.test(template);\n    for (const value of props.samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return (\n        <div>\n            <span>Path notation uses // as a separator, not a comment</span>\n            <p>{legacy ? \"legacy\" : \"modern\"}: mean={mean}, variance={variance}</p>\n        </div>\n    );\n}",
+    "symbol": {
+      "name": "StatsPanel",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "tsx",
+    "comment_kind": "directive",
+    "placement": "before_statement",
+    "comment": "// @ts-ignore",
+    "annotated_code": "    const legacy: any = pattern.test(template);",
+    "annotated_lines": [
+      21,
+      21
+    ],
+    "scope_lines": [
+      8,
+      35
+    ],
+    "enclosing_scope": "export function StatsPanel(props: { samples: number[] }): JSX.Element {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    const legacy: any = pattern.test(template);\n    for (const value of props.samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return (\n        <div>\n            <span>Path notation uses // as a separator, not a comment</span>\n            <p>{legacy ? \"legacy\" : \"modern\"}: mean={mean}, variance={variance}</p>\n        </div>\n    );\n}",
+    "symbol": {
+      "name": "StatsPanel",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "tsx",
+    "comment_kind": "inline",
+    "placement": "trailing",
+    "comment": "// trailing remark about the divisor",
+    "annotated_code": "    const variance = count ? m2 / count : 0.0; ",
+    "annotated_lines": [
+      28,
+      28
+    ],
+    "scope_lines": [
+      8,
+      35
+    ],
+    "enclosing_scope": "export function StatsPanel(props: { samples: number[] }): JSX.Element {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // @ts-ignore\n    const legacy: any = pattern.test(template);\n    for (const value of props.samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; \n    return (\n        <div>\n            <span>Path notation uses // as a separator, not a comment</span>\n            <p>{legacy ? \"legacy\" : \"modern\"}: mean={mean}, variance={variance}</p>\n        </div>\n    );\n}",
+    "symbol": {
+      "name": "StatsPanel",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "tsx",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "// init",
+    "annotated_code": "console.log(StatsPanel);",
+    "annotated_lines": [
+      38,
+      38
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT\n\nimport * as React from \"react\";\n\n/**\n * Renders a small stats summary panel.\n */\nexport function StatsPanel(props: { samples: number[] }): JSX.Element {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // @ts-ignore\n    const legacy: any = pattern.test(template);\n    for (const value of props.samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return (\n        <div>\n            <span>Path notation uses // as a separator, not a comment</span>\n            <p>{legacy ? \"legacy\" : \"modern\"}: mean={mean}, variance={variance}</p>\n        </div>\n    );\n}\n\nconsole.log(StatsPanel);",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  }
+]

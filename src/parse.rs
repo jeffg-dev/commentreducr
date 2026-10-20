@@ -108,7 +108,7 @@ fn parse_input(src: &str, lang: Language) -> Cow<'_, str> {
     text
 }
 
-fn parse_tree(src: &str, lang: Language) -> Result<tree_sitter::Tree> {
+pub(crate) fn parse_tree(src: &str, lang: Language) -> Result<tree_sitter::Tree> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&ts_language(lang))?;
     parser

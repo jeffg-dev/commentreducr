@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use commentreducr::{Config, Languages, Mode, Target, run};
+use commentreducr::{Config, Finding, JudgeKind, Languages, Mode, Target, findings, run};
 use std::path::{Path, PathBuf};
 
 /// Shipped defaults use the same configuration parser as the user's file.
@@ -9,7 +9,8 @@ const DEFAULT_CONFIG_TOML: &str = include_str!("default_config.toml");
 const AFTER_HELP: &str =
     "Advanced options: --help. Settings file: ~/.config/commentreducr/config.toml";
 const AFTER_LONG_HELP: &str = "endpoint, model, docstrings_model, api_key, workers, scope, language, database, \
-                               max_words, ignore, keep_decorators and keep_bases \
+                               max_words, ignore, keep_decorators, keep_bases, judge, judge_model, \
+                               judge_endpoint, escalation_model, generator_model and judge_thresholds \
                                can also be set in ~/.config/commentreducr/config.toml; flags \
                                win.";
 
@@ -31,7 +32,7 @@ enum Command {
     Delete(Opts),
     /// Install a warning-only pre-push hook and prepare the local classifier
     InstallGitHook,
-    /// Check changed Python documentation in commits being pushed
+    /// Check changed comments and docstrings in commits being pushed (or in --changed)
     Check(HookOpts),
 }
 
@@ -46,10 +47,26 @@ struct HookOpts {
     /// SQLite classifier cache [default: Git metadata directory/commentreducr/state.sqlite]
     #[arg(long, value_name = "FILE")]
     database: Option<PathBuf>,
+    /// Check this commit range instead of the push (or upstream..HEAD)
+    #[arg(long, value_name = "BASE..HEAD", conflicts_with = "remote_name")]
+    changed: Option<String>,
+    /// Output format [default: text]; json and sarif print the summary on stderr
+    #[arg(long, value_enum, default_value_t = Format::Text, hide_default_value = true)]
+    format: Format,
+    /// Write the findings to FILE instead of stdout
+    #[arg(long, value_name = "FILE")]
+    output: Option<PathBuf>,
     #[arg(hide = true)]
     remote_name: Option<String>,
     #[arg(hide = true, requires = "remote_name")]
     remote_location: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum Format {
+    Text,
+    Json,
+    Sarif,
 }
 
 fn install_hook() -> Result<()> {
@@ -65,89 +82,90 @@ fn install_hook() -> Result<()> {
     commentreducr::hook_model::install_model()?;
     let path = commentreducr::hook_git::install(&directory)?;
     println!("Installed warning-only pre-push hook: {}", path.display());
+    let judge = load_file_config(&default_config_path())?
+        .judge
+        .unwrap_or(embedded_defaults().judge);
+    if judge == JudgeKind::Legacy {
+        println!(
+            "judge = legacy: Python only, classifier. For all languages, set judge = \"systemone\" in {}",
+            default_config_path().display()
+        );
+    } else {
+        let name = if judge == JudgeKind::SystemOne {
+            "systemone"
+        } else {
+            "generative"
+        };
+        println!("judge = {name}: all languages");
+    }
     Ok(())
 }
 
 fn prepush_check(opts: &HookOpts) -> Result<()> {
+    let text = opts.format == Format::Text;
+    // Under json and sarif, stdout carries only the document.
+    let say = |line: &str| {
+        if text {
+            println!("{line}")
+        } else {
+            eprintln!("{line}")
+        }
+    };
     let result = (|| -> Result<bool> {
-        let defaults = embedded_defaults();
-        let file = load_file_config(&opts.config)?;
+        let file_opts = Opts {
+            config: opts.config.clone(),
+            database: opts.database.clone(),
+            ..Opts::default()
+        };
+        let cfg = build_config(&file_opts, Mode::Reduce)?;
         let mut input = String::new();
         if opts.remote_name.is_some() {
             use std::io::Read;
             std::io::stdin().read_to_string(&mut input)?;
         }
-        let blocks = commentreducr::hook_git::changed_blocks(
-            &std::env::current_dir()?,
-            opts.remote_name.as_ref().map(|_| input.as_str()),
-            opts.remote_name.as_deref(),
-            &merge_list(defaults.ignore, file.ignore),
-            &merge_list(defaults.keep_decorators, file.keep_decorators),
-            &merge_list(defaults.keep_bases, file.keep_bases),
-        )?;
-        if blocks.is_empty() {
-            println!("commentreducr: no changed Python documentation blocks.");
-            return Ok(false);
+        let repo = std::env::current_dir()?;
+        let range = opts.changed.as_deref();
+        let input = opts.remote_name.as_ref().map(|_| input.as_str());
+        let remote = opts.remote_name.as_deref();
+        let (findings, lines, summary, failed) = if cfg.judge == JudgeKind::Legacy {
+            legacy_check(&repo, &cfg, range, input, remote, text)?
+        } else {
+            let stats = commentreducr::check_changed(&repo, &cfg, range, input, remote)?;
+            let errors = stats.files_skipped + stats.llm_errors + stats.classifier_errors;
+            let summary = format!(
+                "commentreducr: {} changed blocks checked; {} findings; {errors} check errors; {} stale; {} untouched.",
+                stats.changed_items,
+                stats.findings.len(),
+                stats.comments_stale,
+                stats.untouched
+            );
+            let failed = !stats.findings.is_empty() || errors > 0;
+            let lines = stats.finding_lines().collect();
+            (stats.findings, lines, summary, failed)
+        };
+        let version = env!("CARGO_PKG_VERSION");
+        let mut document = match opts.format {
+            Format::Text => lines.join("\n"),
+            Format::Json => serde_json::to_string_pretty(&findings::json(&findings))?,
+            Format::Sarif => serde_json::to_string_pretty(&findings::sarif(&findings, version))?,
+        };
+        if !document.is_empty() {
+            document.push('\n');
         }
-        let database = commentreducr::state::Database::open(
-            &std::env::current_dir()?,
-            opts.database.as_deref().or(file.database.as_deref()),
-        )?;
-        let mut classifier = None;
-        let mut findings = 0;
-        let mut errors = 0;
-        for block in &blocks {
-            let verdict = (|| -> Result<bool> {
-                let key =
-                    commentreducr::state::classifier_key(&block.kind, &block.text, &block.context);
-                if let Some((flag, _)) = database.classification(&key)? {
-                    return Ok(flag);
-                }
-                if classifier.is_none() {
-                    classifier = Some(commentreducr::hook_model::Classifier::load()?);
-                }
-                let classifier = classifier.as_mut().unwrap();
-                let probability =
-                    classifier.probability(&block.kind, &block.text, &block.context)?;
-                database.remember_classification(&key, probability, classifier.threshold())
-            })();
-            match verdict {
-                Ok(true) => {
-                    findings += 1;
-                    let advice = if block.kind == "comment" {
-                        "Keep only an unexpected reason, a non-obvious trap, or a shortcut through complex code."
-                    } else {
-                        "Keep the consumer contract: purpose, usage, results, and exceptions."
-                    };
-                    println!(
-                        "{}:{}-{}: possible {} bloat. {advice}",
-                        block.path.display(),
-                        block.start_line,
-                        block.end_line,
-                        block.kind.replace('_', " ")
-                    );
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    errors += 1;
-                    println!(
-                        "{}:{}: could not check this block: {error:#}",
-                        block.path.display(),
-                        block.start_line
-                    );
-                }
-            }
+        match &opts.output {
+            Some(path) => std::fs::write(path, document)
+                .with_context(|| format!("cannot write {}", path.display()))?,
+            None => print!("{document}"),
         }
-        println!(
-            "commentreducr: {} changed blocks checked; {findings} findings; {errors} check errors.",
-            blocks.len()
-        );
-        Ok(findings > 0 || errors > 0)
+        say(&summary);
+        Ok(failed)
     })();
     let failed = match result {
         Ok(failed) => failed,
         Err(error) => {
-            println!("commentreducr: could not complete pre-push check: {error:#}");
+            say(&format!(
+                "commentreducr: could not complete pre-push check: {error:#}"
+            ));
             true
         }
     };
@@ -157,9 +175,112 @@ fn prepush_check(opts: &HookOpts) -> Result<()> {
     Ok(())
 }
 
+/// The classifier path: Python blocks only. Returns findings, the text lines (today's format),
+/// the summary line and whether anything was found or failed. Under json and sarif, per-block
+/// errors go to stderr so stdout stays a valid document.
+fn legacy_check(
+    repo: &Path,
+    cfg: &Config,
+    range: Option<&str>,
+    input: Option<&str>,
+    remote: Option<&str>,
+    text: bool,
+) -> Result<(Vec<Finding>, Vec<String>, String, bool)> {
+    let (blocks, other) = commentreducr::hook_git::changed_blocks(
+        repo,
+        range,
+        input,
+        remote,
+        &cfg.ignore,
+        &cfg.keep_decorators,
+        &cfg.keep_bases,
+    )?;
+    let note = if other > 0 {
+        format!(" {other} non-Python files not checked (set judge = systemone to check them).")
+    } else {
+        String::new()
+    };
+    if blocks.is_empty() {
+        let summary = format!("commentreducr: no changed Python documentation blocks.{note}");
+        return Ok((Vec::new(), Vec::new(), summary, false));
+    }
+    let database = commentreducr::state::Database::open(repo, cfg.database.as_deref())?;
+    let threshold = commentreducr::hook_model::Classifier::default_threshold()?;
+    let mut classifier = None;
+    let mut findings = Vec::new();
+    let mut lines = Vec::new();
+    let mut errors = 0;
+    for block in &blocks {
+        let verdict = (|| -> Result<(bool, f64)> {
+            let key =
+                commentreducr::state::classifier_key(&block.kind, &block.text, &block.context);
+            if let Some(cached) = database.classification(&key)? {
+                return Ok(cached);
+            }
+            if classifier.is_none() {
+                classifier = Some(commentreducr::hook_model::Classifier::load()?);
+            }
+            let classifier = classifier.as_mut().unwrap();
+            let probability = classifier.probability(&block.kind, &block.text, &block.context)?;
+            let flag =
+                database.remember_classification(&key, probability, classifier.threshold())?;
+            Ok((flag, probability))
+        })();
+        match verdict {
+            Ok((true, probability)) => {
+                let advice = if block.kind == "comment" {
+                    "Keep only an unexpected reason, a non-obvious trap, or a shortcut through complex code."
+                } else {
+                    "Keep the consumer contract: purpose, usage, results, and exceptions."
+                };
+                let message = format!("possible {} bloat. {advice}", block.kind.replace('_', " "));
+                lines.push(format!(
+                    "{}:{}-{}: {message}",
+                    block.path.display(),
+                    block.start_line,
+                    block.end_line,
+                ));
+                findings.push(Finding {
+                    path: block.path.clone(),
+                    start_line: block.start_line,
+                    end_line: block.end_line,
+                    tier: block.tier,
+                    kind: block.kind.clone(),
+                    verdict: "bloat".into(),
+                    checks: vec![("classifier".into(), probability, threshold)],
+                    evidence: String::new(),
+                    message,
+                    comment: String::new(),
+                });
+            }
+            Ok(_) => {}
+            Err(error) => {
+                errors += 1;
+                let line = format!(
+                    "{}:{}: could not check this block: {error:#}",
+                    block.path.display(),
+                    block.start_line
+                );
+                if text {
+                    lines.push(line);
+                } else {
+                    eprintln!("{line}");
+                }
+            }
+        }
+    }
+    let summary = format!(
+        "commentreducr: {} changed blocks checked; {} findings; {errors} check errors.{note}",
+        blocks.len(),
+        findings.len()
+    );
+    let failed = !findings.is_empty() || errors > 0;
+    Ok((findings, lines, summary, failed))
+}
+
 /// Field order is help order: common flags, then the "LLM" heading, then "Advanced" (long
 /// help only). Numeric flags are `Option` so the config file can supply them when absent.
-#[derive(clap::Args, Debug)]
+#[derive(clap::Args, Debug, Default)]
 struct Opts {
     /// Directory or file to process [default: .]
     path: Option<PathBuf>,
@@ -172,9 +293,17 @@ struct Opts {
     #[arg(long, value_enum)]
     language: Option<Languages>,
 
+    /// Judge only comments added or changed in this commit range, and report comments whose code changed
+    #[arg(long, value_name = "BASE..HEAD", conflicts_with_all = ["eval", "diagnose", "dump_items"])]
+    changed: Option<String>,
+
     /// With delete only: report changes without writing
     #[arg(long)]
     dry_run: bool,
+
+    /// For AI agents: apply only certain deletes; print everything else as JSONL advice on stdout
+    #[arg(long, conflicts_with_all = ["eval", "diagnose", "dump_items"])]
+    ai: bool,
 
     /// SQLite state file [default: Git metadata directory/commentreducr/state.sqlite]
     #[arg(long, value_name = "FILE")]
@@ -214,6 +343,22 @@ struct Opts {
     #[arg(long, help_heading = "LLM")]
     api_key: Option<String>,
 
+    /// Verdict path [default: legacy]
+    #[arg(long, value_enum, help_heading = "LLM")]
+    judge: Option<JudgeKind>,
+
+    /// Judge model name [default: clef-flash-4bit]
+    #[arg(long, help_heading = "LLM")]
+    judge_model: Option<String>,
+
+    /// Full judge URL [default: derived from the endpoint]
+    #[arg(long, help_heading = "LLM")]
+    judge_endpoint: Option<String>,
+
+    /// JSON file of policy thresholds merged over the shipped ones (e.g. for a fine-tuned judge)
+    #[arg(long, value_name = "FILE", help_heading = "LLM")]
+    judge_thresholds: Option<PathBuf>,
+
     /// (comments only) Target max words in a summary [default: 20]
     #[arg(
         long,
@@ -243,6 +388,26 @@ struct Opts {
         hide_short_help = true
     )]
     eval: Option<PathBuf>,
+
+    /// (v2 datasets) Write one run file per row into DIR, for tools/bakeoff/score.py
+    #[arg(
+        long,
+        value_name = "DIR",
+        requires = "eval",
+        help_heading = "Advanced",
+        hide_short_help = true
+    )]
+    eval_runs: Option<PathBuf>,
+
+    /// Print every item of FILE as JSON (byte range, lines, kind, text, context, structural); no LLM
+    #[arg(
+        long,
+        value_name = "FILE",
+        conflicts_with_all = ["eval", "diagnose"],
+        help_heading = "Advanced",
+        hide_short_help = true
+    )]
+    dump_items: Option<PathBuf>,
 }
 
 /// Optional settings from the config file; flags override these.
@@ -267,6 +432,12 @@ struct FileConfig {
     /// Base-class names whose class docstrings are never touched; merged with the shipped
     /// default like `ignore`.
     keep_bases: Option<Vec<String>>,
+    judge: Option<JudgeKind>,
+    judge_endpoint: Option<String>,
+    judge_model: Option<String>,
+    escalation_model: Option<String>,
+    generator_model: Option<String>,
+    judge_thresholds: Option<PathBuf>,
 }
 
 /// One value parsed from a config line: a quoted string, a bare token kept as text so the caller
@@ -452,6 +623,22 @@ fn assign_config_value(
         "ignore" => cfg.ignore = Some(as_list(key, value, lineno)?),
         "keep_decorators" => cfg.keep_decorators = Some(as_list(key, value, lineno)?),
         "keep_bases" => cfg.keep_bases = Some(as_list(key, value, lineno)?),
+        "judge" => {
+            let s = as_str(key, value, lineno)?;
+            cfg.judge = Some(match s.as_str() {
+                "legacy" => JudgeKind::Legacy,
+                "systemone" => JudgeKind::SystemOne,
+                "generative" => JudgeKind::Generative,
+                _ => anyhow::bail!("line {lineno}: invalid judge"),
+            });
+        }
+        "judge_endpoint" => cfg.judge_endpoint = Some(as_str(key, value, lineno)?),
+        "judge_model" => cfg.judge_model = Some(as_str(key, value, lineno)?),
+        "escalation_model" => cfg.escalation_model = Some(as_str(key, value, lineno)?),
+        "generator_model" => cfg.generator_model = Some(as_str(key, value, lineno)?),
+        "judge_thresholds" => {
+            cfg.judge_thresholds = Some(PathBuf::from(as_str(key, value, lineno)?))
+        }
         _ => {}
     }
     Ok(())
@@ -482,6 +669,9 @@ struct Defaults {
     ignore: Vec<String>,
     keep_decorators: Vec<String>,
     keep_bases: Vec<String>,
+    judge: JudgeKind,
+    judge_model: String,
+    generator_model: String,
 }
 
 fn embedded_defaults() -> Defaults {
@@ -513,6 +703,13 @@ fn embedded_defaults() -> Defaults {
         keep_bases: cfg
             .keep_bases
             .expect("src/default_config.toml: missing `keep_bases`"),
+        judge: cfg.judge.expect("src/default_config.toml: missing `judge`"),
+        judge_model: cfg
+            .judge_model
+            .expect("src/default_config.toml: missing `judge_model`"),
+        generator_model: cfg
+            .generator_model
+            .expect("src/default_config.toml: missing `generator_model`"),
     }
 }
 
@@ -533,19 +730,8 @@ fn load_file_config(path: &Path) -> Result<FileConfig> {
     }
 }
 
-fn main() -> Result<()> {
-    let cli = Cli::parse();
-    std::panic::set_hook(Box::new(|_| {}));
-    let (mode, opts) = match &cli.command {
-        Command::Reduce(o) => (Mode::Reduce, o),
-        Command::Delete(o) => (Mode::Delete, o),
-        Command::InstallGitHook => return install_hook(),
-        Command::Check(opts) => return prepush_check(opts),
-    };
-    anyhow::ensure!(
-        !opts.dry_run || mode == Mode::Delete,
-        "--dry-run only applies to delete"
-    );
+/// Defaults, then the config file, then flags. `check` passes only `config` and `database`.
+fn build_config(opts: &Opts, mode: Mode) -> Result<Config> {
     let defaults = embedded_defaults();
     let file = load_file_config(&opts.config)?;
     let target = opts.scope.or(file.scope).unwrap_or(defaults.scope);
@@ -587,16 +773,70 @@ fn main() -> Result<()> {
         ignore: merge_list(defaults.ignore, file.ignore),
         keep_decorators: merge_list(defaults.keep_decorators, file.keep_decorators),
         keep_bases: merge_list(defaults.keep_bases, file.keep_bases),
+        judge: opts.judge.or(file.judge).unwrap_or(defaults.judge),
+        judge_endpoint: opts.judge_endpoint.clone().or(file.judge_endpoint),
+        judge_model: opts
+            .judge_model
+            .clone()
+            .or(file.judge_model)
+            .unwrap_or(defaults.judge_model),
+        escalation_model: file.escalation_model,
+        generator_model: file.generator_model.unwrap_or(defaults.generator_model),
+        judge_thresholds: opts
+            .judge_thresholds
+            .clone()
+            .or(file.judge_thresholds)
+            .map(|p| {
+                std::fs::read_to_string(&p).with_context(|| format!("cannot read {}", p.display()))
+            })
+            .transpose()?,
+        ai: opts.ai,
     };
     anyhow::ensure!(cfg.llm_concurrency > 0, "workers must be at least 1");
     anyhow::ensure!(cfg.max_summary_words > 0, "max_words must be at least 1");
+    Ok(cfg)
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    std::panic::set_hook(Box::new(|_| {}));
+    let (mode, opts) = match &cli.command {
+        Command::Reduce(o) => (Mode::Reduce, o),
+        Command::Delete(o) => (Mode::Delete, o),
+        Command::InstallGitHook => return install_hook(),
+        Command::Check(opts) => return prepush_check(opts),
+    };
+    anyhow::ensure!(
+        !opts.dry_run || mode == Mode::Delete,
+        "--dry-run only applies to delete"
+    );
+    anyhow::ensure!(
+        !opts.ai || mode == Mode::Reduce,
+        "--ai only applies to reduce"
+    );
+    let cfg = build_config(opts, mode)?;
+    anyhow::ensure!(
+        !cfg.ai || cfg.judge != commentreducr::JudgeKind::Legacy,
+        "--ai needs judge = systemone or generative"
+    );
+    let target = cfg.target;
     if let Some(dataset) = &opts.eval {
         anyhow::ensure!(mode == Mode::Reduce, "--eval only applies to reduce");
+        if commentreducr::eval::is_v2(dataset)? {
+            if cfg.judge == commentreducr::JudgeKind::Legacy {
+                eprintln!("error: a v2 dataset needs --judge systemone or generative");
+                std::process::exit(2);
+            }
+            return commentreducr::eval::run_v2(dataset, &cfg, opts.eval_runs.as_deref());
+        }
         return match target {
             Target::Comments => commentreducr::eval::run(dataset, &cfg),
             Target::Docstrings => commentreducr::eval::run_docstrings(dataset, &cfg),
             Target::All => anyhow::bail!("--eval requires --scope comments or --scope docstrings"),
         };
+    }
+    if let Some(file) = &opts.dump_items {
+        return commentreducr::dump_items(file, &cfg);
     }
     let default_path = PathBuf::from(".");
     let path = opts.path.as_deref().unwrap_or(&default_path);
@@ -609,14 +849,14 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
-    let stats = run(path, &cfg)?;
+    let stats = run(path, &cfg, opts.changed.as_deref())?;
     let noun = match target {
         Target::Comments => "comments",
         Target::Docstrings => "docstrings",
         Target::All => "items",
     };
     eprintln!(
-        "{} files scanned, {} changed, {} skipped; {noun}: {} kept, {} deleted ({} lines), {} reduced ({} lines saved), {} LLM failures",
+        "{} files scanned, {} changed, {} skipped; {noun}: {} kept, {} deleted ({} lines), {} reduced ({} lines saved), {} to review, {} stale, {} LLM failures",
         stats.files_scanned,
         stats.files_changed,
         stats.files_skipped,
@@ -625,8 +865,19 @@ fn main() -> Result<()> {
         stats.lines_deleted,
         stats.comments_reduced,
         stats.lines_reduced,
+        stats.comments_review + stats.comments_rename,
+        stats.comments_stale,
         stats.llm_errors,
     );
+    if cfg.ai {
+        for f in &stats.findings {
+            println!("{}", findings::ai_line(f));
+        }
+    } else {
+        for line in stats.finding_lines() {
+            eprintln!("{line}");
+        }
+    }
     if mode == Mode::Reduce {
         eprintln!(
             "classifier: {} screened, {} cached, {} errors; resume: {} verdicts cached, {} files completed",
@@ -658,6 +909,11 @@ mod tests {
         let d = embedded_defaults();
         assert_eq!(d.scope, Target::All);
         assert_eq!(d.workers, 8);
+        assert_eq!(d.judge, JudgeKind::SystemOne);
+        let j = parse_config("judge = \"systemone\"\njudge_model = \"m\"\njudge_endpoint = \"u\"\nescalation_model = \"e\"").unwrap();
+        assert_eq!(j.judge, Some(JudgeKind::SystemOne));
+        assert_eq!(j.escalation_model.as_deref(), Some("e"));
+        assert!(parse_config("judge = \"bogus\"").is_err());
         let c = parse_config("scope = \"docstrings\"\nworkers = 2\ndatabase = \"state.db\"\nmodel = \"m\"\nignore = [\"vendor/\"]\nmin_lines = 100\n").unwrap();
         assert_eq!(c.scope, Some(Target::Docstrings));
         assert_eq!(c.workers, Some(2));

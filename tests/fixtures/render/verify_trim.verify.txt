@@ -1,0 +1,56 @@
+original:
+# hold the lock: the refresher thread writes _cache
+
+candidate:
+# hold the lock (refresher writes _cache)
+
+annotated_code:
+with self._lock:
+    self._cache[k] = v
+
+enclosing_scope:
+...
+    x130 = 130
+    x131 = 131
+    x132 = 132
+    x133 = 133
+    x134 = 134
+    x135 = 135
+    x136 = 136
+    x137 = 137
+    x138 = 138
+    x139 = 139
+    x140 = 140
+    x141 = 141
+    x142 = 142
+    x143 = 143
+    x144 = 144
+    x145 = 145
+    x146 = 146
+    x147 = 147
+    x148 = 148
+    x149 = 149
+    with self._lock:
+        self._cache[k] = v
+    y0 = 0
+    y1 = 1
+    y2 = 2
+    y3 = 3
+    y4 = 4
+    y5 = 5
+    y6 = 6
+    y7 = 7
+    y8 = 8
+    y9 = 9
+    y10 = 10
+    y11 = 11
+    y12 = 12
+    y13 = 13
+    y14 = 14
+    y15 = 15
+    y16 = 16
+    y17 = 17
+    y18 = 18
+    y19 = 19
+    y20 = 20
+...

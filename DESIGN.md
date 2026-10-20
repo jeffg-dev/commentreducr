@@ -16,7 +16,7 @@ TypeScript includes TSX; all also includes JavaScript and YAML. There are no lin
 trailing-comment, or code-like gates. Every build includes local classifier inference and SQLite.
 
 `install-git-hook` installs/upgrades the warning-only pre-push wrapper. `check [--warn]` checks
-changed committed Python blocks, with whole surviving blocks selected when an interior deletion
+changed committed blocks (Python only under `judge = legacy`; every language otherwise, see Changeset mode), with whole surviving blocks selected when an interior deletion
 changes them. Manual checks use upstream..HEAD. Git push stdin determines all actual pushed
 refs. Existing hooks are chained with their original arguments, stdin, and status. Checks leave
 source untouched and share the classifier cache with reduction.
@@ -24,6 +24,37 @@ source untouched and share the classifier cache with reduction.
 Tracked source selection and config list layering remain unchanged: Git-tracked files minus
 repo/config ignores, Rust UI snapshots skipped, defaults -> config -> flags. Scope and language
 also support config keys. Paths preserve symlinks for the planner to reject before any writes.
+
+## Judge path (default)
+
+With `judge = systemone` (the default) each judged item gets a context and evidence record
+(`context.rs`, `evidence.rs`), rendered into one state (`render.rs`). A decision model answers
+the strict schema (`src/schema/strict-v1.json`) through `/v1/systemone` (`judge.rs`), and
+`policy.rs` maps the probabilities to keep, delete, rewrite_shorter, fix_wrong_claim,
+rename_instead or review, with thresholds from `src/schema/thresholds-strict-v1.json` merged
+with `judge_thresholds`. Review, rename and failed rewrites keep the item. Rewrites come from
+`generator_model` and are applied only when the judge verifies them (`verify-v1.json`).
+
+`reduce --ai` widens the review band to `ai_margin`, applies deletes only, and returns every
+review, rewrite, fix, rename and stale item as a JSONL record on stdout (`findings::ai_line`).
+It skips `resume` so a rerun reprints open advice; verdicts stay cached. `ai` is part of the
+verdict cache key because it changes dispositions.
+
+## Changeset mode
+
+`reduce --changed BASE..HEAD` and `check` read the commit range from Git (`changeset.rs`: changed
+files, hunks, head blobs) and sort every item in each changed file into tiers. Tier 1: comment
+added or modified in the range, full schema, may be edited. Tier 2: comment unchanged but the
+annotated code or its enclosing function changed; the renderer adds `state.change` with before
+and after blocks, only `g1_contradicts`, `g1_unverifiable` and `c8_durability` are judged, the
+MiniLM screener is bypassed, results use a separate cache key, and it is never edited: a contradiction is reported as stale. Tier 3: not judged, not touched. Agent
+authorship (`authored_by_agent`) comes from the commits in range.
+
+`check` runs the same pipeline on committed blobs in report-only mode: it skips `resume`,
+writes no source file and records findings (`findings.rs`) as text, JSON or SARIF 2.1.0 written
+by hand. Under `judge = legacy` it keeps the Python-only classifier path and converts its
+findings to the same type. Writes in `reduce` still pass through the re-parse check, source
+hash check and atomic write unchanged.
 
 ## Reduction and durable state
 

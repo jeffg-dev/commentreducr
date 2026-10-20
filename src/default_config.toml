@@ -12,3 +12,6 @@ max_words = 20                                # comments only: target max words 
 ignore = ["migrations/"]   # gitignore-syntax patterns; a user config's list is appended to this one
 keep_decorators = ["tool", "command", "group"]   # docstrings under these decorators are never touched (Strands @tool, click/typer commands)
 keep_bases = ["Signature", "BaseModel"]          # class docstrings with these bases are never touched (dspy.Signature, pydantic.BaseModel)
+judge = "systemone"                           # systemone | generative | legacy. legacy: the old prompt path; `check` covers Python only
+judge_model = "clef-flash-4bit"               # model the judge backend asks
+generator_model = "gemma-4-26b-a4b-it-4bit"   # judge = systemone: writes the rewrites the judge verifies

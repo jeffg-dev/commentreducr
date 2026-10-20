@@ -1,6 +1,6 @@
 [package]
 name = "commentreducr"
-version = "1.1.0"
+version = "2.0.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "Strip low-value comments and docstrings from a JS/TS/Python/YAML/Rust codebase, keeping structural ones"
@@ -8,7 +8,7 @@ repository = "https://github.com/jeffg-dev/commentreducr"
 readme = "README.md"
 keywords = ["comments", "cli", "tree-sitter", "refactoring", "docstrings"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["tools/", "assets/", "models/", "DESIGN.md"]
+exclude = ["tools/", "assets/", "models/", "docs/", "DESIGN.md"]
 
 [dependencies]
 anyhow = "1.0.104"

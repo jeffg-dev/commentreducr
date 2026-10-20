@@ -1,0 +1,108 @@
+{
+ "kind": {
+  "type": "choice",
+  "instructions": "What kind of comment is `comment`?",
+  "criteria": {
+   "rationale": "Explains why `annotated_code` is the way it is.",
+   "summary": "Says what `annotated_code` does, at a level above the code.",
+   "contract": "States what a caller of `symbol` is promised.",
+   "invariant": "States a precise fact below the code's level: exact meaning, units, an invariant.",
+   "warning": "Warns of a trap, danger, ordering requirement or unit mismatch.",
+   "alternatives_rejected": "Describes an approach that was considered and not taken.",
+   "todo": "Records unfinished work: TODO, FIXME, HACK, XXX.",
+   "directive": "A linter, formatter or type-checker pragma.",
+   "restating": "Says the same thing as `annotated_code`, at the same level.",
+   "commented_out_code": "Code that has been disabled by commenting it out.",
+   "journal_or_history": "Dates, tickets, authors, or what the code used to do.",
+   "banner": "A section marker or closing-brace comment.",
+   "cross_reference_leak": "Explains this code by what another module, file or caller expects or mirrors.",
+   "change_narration": "Explains the edit that introduced it rather than the code, e.g. 'switched to a dict because the old list was O(n)'."
+  }
+ },
+ "g1_contradicts": {
+  "type": "noul",
+  "instructions": "Does any claim in `comment` contradict `annotated_code` or `enclosing_scope`, meaning the code does the opposite or no longer does it?"
+ },
+ "g1_unverifiable": {
+  "type": "noul",
+  "instructions": "Does `comment` make a claim about behaviour that neither `annotated_code` nor `enclosing_scope` can confirm, such as a claim about another service or a past incident, while making no claim that the code contradicts?"
+ },
+ "hazard": {
+  "type": "noul",
+  "instructions": "Does `comment` state a trap, danger, ordering requirement, unit mismatch, external quirk, or caller precondition that a competent first-time reader of `annotated_code` would not see? Thread or reentrancy constraints, security or data-loss consequences, and an external bug being worked around count. Useful background does not."
+ },
+ "c2_info_gain": {
+  "type": "score",
+  "instructions": "How much does `comment` say that the names, types and code in `annotated_code` do not?",
+  "criteria": [
+   "Restates the code, e.g. `i += 1  # increment i`.",
+   "Paraphrases the code in other words.",
+   "Adds one fact the code cannot show.",
+   "Adds facts a careful reader could not recover even after reading all of `enclosing_scope`."
+  ]
+ },
+ "c3_rationale": {
+  "type": "score",
+  "instructions": "Does `comment` explain why `annotated_code` is the way it is? If no why is needed, as for a correct contract, answer 2.",
+  "criteria": [
+   "No why where one is needed, or no why at all.",
+   "A vague why, e.g. 'for performance'.",
+   "A specific why, e.g. '250 ms backoff: the vendor rate-limits at 5 req/s'.",
+   "A specific why plus the rejected alternative or the consequence of changing it."
+  ]
+ },
+ "c4_level": {
+  "type": "choice",
+  "instructions": "At what level does `comment` sit relative to `annotated_code`?",
+  "criteria": {
+   "same_level_narration": "Narrates what the code does at the same level as the code.",
+   "higher_summary": "Summarises the code at a higher level than the code.",
+   "lower_precision": "Adds precision below the code's level: exact meaning, invariant, units.",
+   "mental_model": "Gives the reader a model of the problem that the code cannot."
+  }
+ },
+ "c8_durability": {
+  "type": "score",
+  "instructions": "How likely is `comment` to become wrong when nearby code changes?",
+  "criteria": [
+   "Hard-codes volatile facts: line numbers, literal values duplicated from the code, other files' internals.",
+   "Accurate today but tied to detail that changes often.",
+   "States a stable intent or constraint.",
+   "Stable and machine-checked (doctest, assertion, type) or linked to a durable record."
+  ]
+ },
+ "c9_replaceable": {
+  "type": "choice",
+  "instructions": "Could a rename, a type, an assertion, or an extracted function carry what `comment` says?",
+  "criteria": {
+   "fully": "Yes: a name, type, assertion or extracted function you could name would make `comment` unnecessary.",
+   "partly": "Part of what `comment` says could move into the code; the rest could not.",
+   "no": "No: `comment` carries rationale, history, an external constraint, or a cross-module invariant."
+  }
+ },
+ "leak": {
+  "type": "noul",
+  "instructions": "Does `comment` explain this code by naming another module, file, caller, or sibling and what it expects, relies on or mirrors? A generic precondition on any caller, such as 'hold the lock before calling', is not a leak."
+ },
+ "c5_contract": {
+  "type": "score",
+  "instructions": "Could a caller use `symbol` correctly from `comment` alone?",
+  "criteria": [
+   "Echoes the signature.",
+   "A summary only.",
+   "States inputs, outputs and errors.",
+   "Also states side effects, units, ownership, thread-safety, or gives an example."
+  ]
+ },
+ "verdict": {
+  "type": "choice",
+  "instructions": "Under the strict policy, what should happen to `comment`? An inline comment survives only if it states a hazard, a genuine contract, or a specific rationale the code cannot carry. A doc comment (`comment_kind` api_doc) survives only if it states a contract a caller needs. Nothing survives if it contradicts the code. Doc comments are never deleted only for being long; a signature echo is.",
+  "criteria": {
+   "keep": "Already terse and earns its place.",
+   "rewrite_shorter": "Earns its place but says more than the hazard or contract, or says it in another module's terms; a shorter version in this code's own terms should replace it.",
+   "delete": "Restates the code; or is restating, commented-out code, journal or history, a banner, or change narration; or is a leak with no hazard; or is an inline comment with no hazard and no specific rationale; or is a doc comment that only echoes the signature.",
+   "rename_instead": "A rename, type, assertion or extracted function would fully replace it.",
+   "fix_wrong_claim": "It contradicts the code and something true remains to be said; if nothing true remains, choose delete."
+  }
+ }
+}

@@ -1,0 +1,143 @@
+[
+  {
+    "language": "python",
+    "comment_kind": "api_doc",
+    "placement": "module_head",
+    "comment": "\"\"\"Module docstring for the scopes fixture.\"\"\"",
+    "annotated_code": "\nimport threading\n\n\nclass Cache:\n    \"\"\"A tiny cache guarded by a lock.\"\"\"\n\n    def __init__(self):\n        self._lock = threading.Lock()\n        self._data = {}",
+    "annotated_lines": [
+      0,
+      10
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "\nimport threading\n\n\nclass Cache:\n    \"\"\"A tiny cache guarded by a lock.\"\"\"\n\n    def __init__(self):\n        self._lock = threading.Lock()\n        self._data = {}\n\n    def set(self, key, value):\n        # take the lock before touching the dict\n        with self._lock:\n            self._data[key] = value  # last write wins\n            self._data[key + \"!\"] = value\n            # nothing else to do here\n\n\ndef _helper(x):\n    \"\"\"Double the input.\"\"\"\n    return x * 2\n\n\ndef test_helper():\n    # the helper doubles\n    assert _helper(2) == 4",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "api_doc",
+    "placement": "class_head",
+    "comment": "\"\"\"A tiny cache guarded by a lock.\"\"\"",
+    "annotated_code": "class Cache:\n\n    def __init__(self):\n        self._lock = threading.Lock()\n        self._data = {}\n\n    def set(self, key, value):\n        # take the lock before touching the dict\n        with self._lock:\n            self._data[key] = value  # last write wins\n            self._data[key + \"!\"] = value",
+    "annotated_lines": [
+      5,
+      16
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "class Cache:\n\n    def __init__(self):\n        self._lock = threading.Lock()\n        self._data = {}\n\n    def set(self, key, value):\n        # take the lock before touching the dict\n        with self._lock:\n            self._data[key] = value  # last write wins\n            self._data[key + \"!\"] = value\n            # nothing else to do here",
+    "symbol": {
+      "name": "Cache",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "# take the lock before touching the dict",
+    "annotated_code": "        with self._lock:\n            self._data[key] = value  # last write wins\n            self._data[key + \"!\"] = value\n            # nothing else to do here",
+    "annotated_lines": [
+      14,
+      17
+    ],
+    "scope_lines": [
+      12,
+      17
+    ],
+    "enclosing_scope": "    def set(self, key, value):\n        with self._lock:\n            self._data[key] = value  # last write wins\n            self._data[key + \"!\"] = value\n            # nothing else to do here",
+    "symbol": {
+      "name": "Cache.set",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "inline",
+    "placement": "trailing",
+    "comment": "# last write wins",
+    "annotated_code": "            self._data[key] = value  ",
+    "annotated_lines": [
+      15,
+      15
+    ],
+    "scope_lines": [
+      12,
+      17
+    ],
+    "enclosing_scope": "    def set(self, key, value):\n        # take the lock before touching the dict\n        with self._lock:\n            self._data[key] = value  \n            self._data[key + \"!\"] = value\n            # nothing else to do here",
+    "symbol": {
+      "name": "Cache.set",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "# nothing else to do here",
+    "annotated_code": "def _helper(x):\n    \"\"\"Double the input.\"\"\"\n    return x * 2",
+    "annotated_lines": [
+      20,
+      22
+    ],
+    "scope_lines": [
+      12,
+      17
+    ],
+    "enclosing_scope": "    def set(self, key, value):\n        # take the lock before touching the dict\n        with self._lock:\n            self._data[key] = value  # last write wins\n            self._data[key + \"!\"] = value\n\n\ndef _helper(x):\n    \"\"\"Double the input.\"\"\"\n    return x * 2",
+    "symbol": {
+      "name": "Cache.set",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "api_doc",
+    "placement": "function_head",
+    "comment": "\"\"\"Double the input.\"\"\"",
+    "annotated_code": "def _helper(x):\n    return x * 2",
+    "annotated_lines": [
+      20,
+      22
+    ],
+    "scope_lines": [
+      20,
+      22
+    ],
+    "enclosing_scope": "def _helper(x):\n    return x * 2",
+    "symbol": {
+      "name": "_helper",
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "# the helper doubles",
+    "annotated_code": "    assert _helper(2) == 4",
+    "annotated_lines": [
+      27,
+      27
+    ],
+    "scope_lines": [
+      25,
+      27
+    ],
+    "enclosing_scope": "def test_helper():\n    assert _helper(2) == 4",
+    "symbol": {
+      "name": "test_helper",
+      "public": true,
+      "is_test": true
+    }
+  }
+]

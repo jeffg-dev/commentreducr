@@ -1,0 +1,6 @@
+{
+ "g1_contradicts": {
+  "type": "noul",
+  "instructions": "`annotated_code_before` is the code before the change; `annotated_code` is the code after it. The comment was true of the code before; the question is only whether the change made it false. Does a claim in `comment` contradict `annotated_code`, the code after the change: does that code now do the opposite, or no longer do what the claim says? A claim the code before and after both satisfy is not contradicted, and neither is a claim the code cannot confirm."
+ }
+}

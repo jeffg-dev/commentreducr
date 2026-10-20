@@ -19,6 +19,8 @@ pub struct Progress<'a> {
     started: Instant,
     /// Serializes output; holds the last 10% milestone printed (non-tty).
     last_milestone: Mutex<usize>,
+    /// `print` goes to stderr too, keeping stdout for a machine-readable document (`--ai`).
+    pub(crate) stderr_only: bool,
 }
 
 impl<'a> Progress<'a> {
@@ -32,6 +34,7 @@ impl<'a> Progress<'a> {
             tty: std::io::stderr().is_terminal(),
             started: Instant::now(),
             last_milestone: Mutex::new(0),
+            stderr_only: false,
         }
     }
 
@@ -62,11 +65,15 @@ impl<'a> Progress<'a> {
         self.redraw(&mut last);
     }
 
-    /// A line on stdout (verbose / dry-run detail), keeping the progress line intact.
+    /// A line on stdout (verbose / dry-run detail; stderr with `stderr_only`), keeping the progress line intact.
     pub fn print(&self, msg: impl Display) {
         let mut last = self.last_milestone.lock().unwrap();
         self.clear_line();
-        println!("{msg}");
+        if self.stderr_only {
+            eprintln!("{msg}");
+        } else {
+            println!("{msg}");
+        }
         self.redraw(&mut last);
     }
 

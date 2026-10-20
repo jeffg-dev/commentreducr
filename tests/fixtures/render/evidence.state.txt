@@ -1,0 +1,23 @@
+language: python  comment_kind: inline  placement: before_statement
+
+comment:
+# hold the lock: the refresher thread writes _cache
+
+annotated_code:
+with self._lock:
+    self._cache[k] = v
+
+symbol: Cache.set  public: False  is_test: True
+
+evidence:
+authored_by_agent: True
+agent: claude-code
+comment_age_days: 412
+code_newer_than_comment: False
+
+enclosing_scope:
+class Cache:
+    def set(self, k, v):
+        # hold the lock: the refresher thread writes _cache
+        with self._lock:
+            self._cache[k] = v

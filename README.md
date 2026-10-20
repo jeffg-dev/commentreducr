@@ -146,6 +146,7 @@ commentreducr reduce src --scope comments --language rust --workers 4
 commentreducr reduce . --scope docstrings --language python
 commentreducr delete . --scope all --language python --dry-run
 commentreducr delete . --scope comments --language typescript
+commentreducr reduce . --ai          # for AI agents: JSONL advice on stdout
 commentreducr install-git-hook
 commentreducr check --warn
 ```
@@ -162,17 +163,71 @@ This is a breaking CLI change: the `comments` and `docstrings` subcommands and t
 `install-hook` is now `install-git-hook`; `prepush-check` is now `check`. Run
 `install-git-hook` again to upgrade a previously installed hook and preserve its original chain.
 
-`reduce` examines every non-structural item, including single-line, trailing, inline,
-and code-like comments. Python items are screened by the frozen classifier; FLAG items
-and blocks too large for its 384-token limit reach the LLM, which can retain, reduce, or
-delete them. Oversized blocks bypass classifier inference and reach the LLM in full.
-Other languages go directly to the LLM because the classifier was trained for Python.
-`--workers N` bounds concurrent
-LLM requests, including requests for different items in one file. The line-count and density
-gates are gone; old `min_lines`/`min_density` config keys are ignored.
+`reduce` works in four steps:
+
+1. Fixed rules keep structural items without asking a model (see Preserved documentation).
+2. Each remaining item gets its context: the code it describes, the enclosing function or
+   class, and evidence such as whether the names it mentions exist.
+3. A decision model (Clef-Flash by default, through a `/v1/systemone` endpoint such as oMLX
+   0.7.1 or later) answers 13 yes/no and score questions about the item, and fixed thresholds
+   turn the answers into keep, delete, rewrite, fix or review. Items that are close to a
+   threshold are review; `reduce` keeps them unchanged.
+4. A local generative model (`generator_model`) writes the rewrites. The decision model checks
+   each rewrite: it must keep every fact, add none, and not contradict the code. A rewrite
+   that fails the check leaves the original.
+
+Python items are first screened by the frozen MiniLM classifier; items it passes are kept
+without reaching the judge. `--workers N` bounds concurrent model requests. `reduce` edits
+files in place and never runs Git commands: review and commit the result yourself.
+`judge = "legacy"` (or `--judge legacy`) restores the 1.x prompt path.
+
+### For AI agents: `--ai`
+
+`reduce --ai` is for running under an AI coding harness such as Claude Code. It applies only
+the deletes the judge is sure of, writes nothing else, and prints one JSON object per line on
+stdout for every item it left for the agent. Everything else goes to stderr. Items close to a
+threshold count as uncertain: the review band is at least `ai_margin` (0.1) wide in this
+mode. A rerun reprints the open advice from cached verdicts.
+
+```json
+{"comment":"// A later registered operator can send work to an earlier one. Continue\n// until a complete pass runs none.","end_line":65,"evidence":"authored_by_agent: False; comment_age_days: 0; code_newer_than_comment: False","kind":"inline","path":"d2.ts","recommendation":"Delete or reduce via rewrite","signals":[{"signal":"P(contradicts the code); fix above","threshold":0.4,"value":0.2},{"signal":"information the code does not show, 0-3; delete below","threshold":0.5,"value":1.14},{"signal":"P(a rename could replace it); rename above","threshold":0.5,"value":0.07},{"signal":"P(warns about a trap or hazard); keep at or above","threshold":0.3,"value":0.2},{"signal":"explains why, 0-3; keep at or above","threshold":1.0,"value":0.53}],"start_line":64}
+```
+
+`recommendation` is one of:
+
+| Recommendation | Meaning |
+|---|---|
+| `Delete or reduce via rewrite` | Uncertain: the item is near a threshold. |
+| `Reduce via rewrite` | Keep the meaning in fewer words. |
+| `Fix via rewrite: it may contradict the code` | The comment may be wrong. |
+| `Delete after renaming the code so the name says it` | A better name would carry the comment. |
+| `Fix or delete: the code it describes changed` | `--changed` only: the comment may now be stale. |
+
+`signals` are the judge's scores that decided the item, each with its threshold. `comment` is
+the item as it appears in the file, delimiters included. Keys are in alphabetical order.
+
+### Using your own judge model
+
+Point either mode at any `/v1/systemone` server, for example a fine-tuned Clef-Flash served by
+`tools/finetune/serve.py`, and give it the thresholds tuned for it:
+
+```sh
+commentreducr reduce . --judge-endpoint http://127.0.0.1:8102/v1/systemone \
+  --judge-model my-clef-ft --judge-thresholds my-thresholds.json
+```
+
+The same settings work as `judge_endpoint`, `judge_model` and `judge_thresholds` in the config
+file. The thresholds file holds only the keys to change, for example
+`{"stale_g1": 0.9, "ai_margin": 0.15}`.
 
 `delete` removes every safely editable non-structural item in scope without a classifier
 or LLM. `--dry-run` applies to deletion only and prints proposed changes without writing.
+
+### Only changed comments
+
+`reduce --changed BASE..HEAD` judges only comments added or edited in that commit range, and
+reports (never edits) unchanged comments that the change made wrong. The working
+tree must match HEAD; files outside the path argument are left alone.
 
 ## Resume and local state
 
@@ -206,7 +261,7 @@ ORDER BY file, start_line;
 
 Classification values are `PASS`, `FLAG`, `DIRECT` (non-Python or oversized), or `ERROR`.
 Progress is `pending`, `in_progress`, `ready`, `kept`, `applied`, or `error`; dispositions are `keep`,
-`reduce`, `delete`, or `error`. Cached classifier probabilities are in `classifications`.
+`reduce`, `delete`, `review`, `rename`, `stale`, `rewrite` and `fix` (the last two in `--ai` only), or `error`. Cached classifier probabilities are in `classifications`.
 
 ## Git hook and checks
 
@@ -218,7 +273,31 @@ repeatable and upgrades the previous commentreducr wrapper.
 pushed, including multiple refs. A manual invocation compares HEAD with its upstream; new
 branches use known remote history, and the first push checks the whole Python tree. Only
 changed blocks are classified, with the complete block and nearby code as context. Source
-files are untouched. This checker remains Python-only.
+files are untouched. With the default `judge = "systemone"` it checks every language through
+the judge, report-only; `judge = "legacy"` checks only Python, with the classifier. `--changed BASE..HEAD` checks a commit range instead of the push.
+`--format json` or `--format sarif` prints a findings document on stdout (the summary goes to
+stderr), and `--output FILE` writes the findings to a file instead.
+
+Every comment in a changed file falls into one of three tiers. Tier 1 is a comment added or
+modified in the range; it gets the full judgement and can be reported as bloat or wrong.
+Tier 2 is an unchanged comment whose code or enclosing function changed. It is judged only
+when the change touched something the comment names: an identifier (matched across camelCase
+and snake_case) on a line of the comment's code or enclosing function that the change removed or
+rewrote, or a number or quoted string whose
+value the change removed. That token is the finding's evidence. The judge is then asked only
+whether the code after the change contradicts the comment; if it does, the comment is reported
+as stale. Tier 2 is never edited, and with `judge = "legacy"` it is never reported. Tier 3 is
+everything else, which is not judged. `reduce --changed BASE..HEAD` applies the same tiers and
+edits only tier 1.
+
+To show findings as pull request annotations, upload the SARIF in a GitHub workflow:
+
+```yaml
+- run: commentreducr check --changed origin/${{ github.base_ref }}..HEAD --format sarif --output results.sarif --warn
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
 
 `check --warn` prints findings and errors to stdout and exits 0. Strict `check` exits 1 for
 findings or errors, otherwise 0. Findings require author review. Oversized targets that cannot
@@ -247,7 +326,8 @@ stage decides what can survive.
 Settings use `~/.config/commentreducr/config.toml` (`XDG_CONFIG_HOME` when set), or
 `--config FILE`. Flags override the file, which overrides these defaults. `model` supplies
 comments and is the fallback for docstrings; `docstrings_model` can override it. The `--model`
-flag overrides both for a run. List values append to the defaults.
+flag overrides both for a run. `judge` picks the verdict path; `legacy` is the original prompt
+path (flags: `--judge`, `--judge-model`, `--judge-endpoint`, `--judge-thresholds`). List values append to the defaults.
 
 ```toml
 scope = "all"
@@ -260,6 +340,12 @@ max_words = 20
 ignore = ["migrations/"]
 keep_decorators = ["tool", "command", "group"]
 keep_bases = ["Signature", "BaseModel"]
+judge = "systemone"              # systemone | generative | legacy
+judge_model = "clef-flash-4bit"
+# judge_endpoint = "..."         # full URL (generative: .../chat/completions or its base); default {endpoint}/systemone (systemone) or endpoint
+generator_model = "gemma-4-26b-a4b-it-4bit"   # systemone: writes the rewrites the judge verifies
+# escalation_model = "..."       # no escalation when unset
+# judge_thresholds = "th.json"   # JSON of policy thresholds merged over the shipped ones (--judge-thresholds)
 # database = "/path/to/local/state.sqlite"
 # api_key = "..."
 ```

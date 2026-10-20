@@ -28,6 +28,10 @@ impl Scope {
     }
 }
 
+const TODO_PATTERN: &str = r"(?i)\b(TODO|FIXME|XXX|HACK|NOTE)\b";
+
+static TODO_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(TODO_PATTERN).unwrap());
+
 /// Table of directive patterns. Each row is checked against every comment's raw text in a block;
 /// a match anywhere makes the block structural. Kept as a handful of alternations rather than one
 /// regex per directive.
@@ -39,8 +43,6 @@ static RULES: LazyLock<Vec<(Scope, Regex)>> = LazyLock::new(|| {
             Scope::Python,
             r"(?i)^#\s*(noqa\b|type:|pyright:|pylint:|mypy:|ruff:|isort:|fmt:|pragma\b|nosec\b|noinspection\b|cython:|distutils:|%%)",
         ),
-        // All: TODO/FIXME/XXX/HACK/NOTE, anywhere in the comment.
-        (Scope::All, r"(?i)\b(TODO|FIXME|XXX|HACK|NOTE)\b"),
         // JS/TS: eslint-*, @ts-*, prettier/biome ignore, coverage ignores, @flow, @jsx*, @license,
         // @preserve, @generated, #region/#endregion, webpack/vite magic comments.
         (
@@ -92,6 +94,13 @@ static LICENSE_RE: LazyLock<Regex> =
 
 /// True if the block (or any comment in it) is structural and must be preserved in both modes.
 pub fn is_structural(block: &CommentBlock, lang: Language, src: &str) -> bool {
+    // TODO/FIXME/XXX/HACK/NOTE, anywhere in the comment.
+    block.comments.iter().any(|c| TODO_RE.is_match(&c.text)) || is_directive(block, lang, src)
+}
+
+/// `is_structural` without the TODO/NOTE rule: shebangs, cookies, tool directives, licenses, doc
+/// comments.
+pub(crate) fn is_directive(block: &CommentBlock, lang: Language, src: &str) -> bool {
     // Python/YAML shebang: the very first byte of the file, or right after a leading UTF-8 BOM
     // (which some editors/tools prepend and which must itself survive untouched).
     let content_start = if src.starts_with('\u{feff}') {

@@ -1,0 +1,45 @@
+{
+ "id": "syn-04",
+ "judge": "systemone:synthetic",
+ "answers": {
+  "g1_contradicts": {
+   "true": 1.0,
+   "false": 0.0
+  },
+  "c2_info_gain": {
+   "0": 0.0,
+   "1": 0.0,
+   "2": 1.0,
+   "3": 0.0
+  },
+  "hazard": {
+   "true": 0.9,
+   "false": 0.1
+  },
+  "c3_rationale": {
+   "0": 0.0,
+   "1": 0.0,
+   "2": 1.0,
+   "3": 0.0
+  },
+  "leak": {
+   "true": 0.0,
+   "false": 1.0
+  },
+  "c9_replaceable": {
+   "fully": 0.0,
+   "partly": 0.0,
+   "no": 1.0
+  }
+ },
+ "verdict": null,
+ "rewrite": "# returns the name",
+ "latency_ms": 210,
+ "input_tokens": 450,
+ "raw": null,
+ "rewrite_scores": {
+  "adds": 0.7,
+  "g1_candidate": 0.05,
+  "preserves": 0.9
+ }
+}

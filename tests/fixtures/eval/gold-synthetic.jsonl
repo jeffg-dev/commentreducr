@@ -1,0 +1,8 @@
+{"id": "syn-01", "source": {"repo": "synthetic"}, "language": "python", "comment_kind": "inline", "comment": "# lock before cache", "labels": {"verdict": "keep", "hazard": true, "g1_contradicts": false, "c2_info_gain": 2}}
+{"id": "syn-02", "source": {"repo": "synthetic"}, "language": "python", "comment_kind": "inline", "comment": "# increment i", "labels": {"verdict": "delete", "hazard": false, "g1_contradicts": false, "c2_info_gain": 0}}
+{"id": "syn-03", "source": {"repo": "synthetic"}, "language": "typescript", "comment_kind": "inline", "comment": "// retry once", "labels": {"verdict": "keep", "hazard": true, "g1_contradicts": false, "c2_info_gain": 1}}
+{"id": "syn-04", "source": {"repo": "synthetic"}, "language": "python", "comment_kind": "inline", "comment": "# returns the id", "labels": {"verdict": "fix_wrong_claim", "hazard": false, "g1_contradicts": true, "c2_info_gain": 1}}
+{"id": "syn-05", "source": {"repo": "synthetic"}, "language": "python", "comment_kind": "todo", "comment": "# TODO: remove", "labels": {"verdict": "keep", "hazard": false}}
+{"id": "syn-06", "source": {"repo": "synthetic"}, "language": "typescript", "comment_kind": "inline", "comment": "// maybe cache", "labels": {"verdict": "delete", "hazard": false, "g1_contradicts": false, "c2_info_gain": 1}}
+{"id": "syn-07", "source": {"repo": "synthetic"}, "language": "typescript", "comment_kind": "inline", "comment": "// a\n// b", "labels": {"verdict": "keep", "hazard": false, "g1_contradicts": false, "c2_info_gain": 2}}
+{"id": "syn-08", "source": {"repo": "synthetic"}, "language": "python", "comment_kind": "api_doc", "comment": "\"\"\"Return x.\"\"\"", "labels": {"verdict": "rewrite_shorter", "hazard": false, "g1_contradicts": false, "c2_info_gain": 2, "c5_contract": 3}}

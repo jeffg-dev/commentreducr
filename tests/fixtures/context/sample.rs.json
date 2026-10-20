@@ -1,0 +1,176 @@
+[
+  {
+    "language": "rust",
+    "comment_kind": "directive",
+    "placement": "module_head",
+    "comment": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT",
+    "annotated_code": "#![deny(missing_docs)]\n\n/// Computes a running mean and variance over a stream of numbers.\n///\n/// ```\n/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));\n/// ```\npub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };",
+    "annotated_lines": [
+      4,
+      23
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "\n//! A small stats helper.\n#![deny(missing_docs)]\n\n/// Computes a running mean and variance over a stream of numbers.\n///\n/// ```\n/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));\n/// ```\npub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean, /* inline /* nested */ remark */ variance)\n}\n\n// init\n/// Sample input.\npub const SAMPLES: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "api_doc",
+    "placement": "module_head",
+    "comment": "//! A small stats helper.",
+    "annotated_code": "#![deny(missing_docs)]\n\n/// Computes a running mean and variance over a stream of numbers.\n///\n/// ```\n/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));\n/// ```\npub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };",
+    "annotated_lines": [
+      4,
+      23
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT\n\n#![deny(missing_docs)]\n\n/// Computes a running mean and variance over a stream of numbers.\n///\n/// ```\n/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));\n/// ```\npub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean, /* inline /* nested */ remark */ variance)\n}\n\n// init\n/// Sample input.\npub const SAMPLES: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "api_doc",
+    "placement": "before_statement",
+    "comment": "/// Computes a running mean and variance over a stream of numbers.\n///\n/// ```\n/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));\n/// ```",
+    "annotated_code": "pub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;",
+    "annotated_lines": [
+      11,
+      21
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT\n\n//! A small stats helper.\n#![deny(missing_docs)]\n\npub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean, /* inline /* nested */ remark */ variance)\n}\n\n// init\n/// Sample input.\npub const SAMPLES: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "// This function walks the list of samples and computes a running mean and\n// a running variance using a numerically stable single-pass algorithm so\n// that we never have to keep the whole sample list around in memory. It\n// is deliberately written without any external dependencies so that it\n// can be dropped into any small crate without pulling in a math library.",
+    "annotated_code": "    let mut count = 0.0;",
+    "annotated_lines": [
+      17,
+      17
+    ],
+    "scope_lines": [
+      11,
+      33
+    ],
+    "enclosing_scope": "pub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean, /* inline /* nested */ remark */ variance)\n}",
+    "symbol": {
+      "name": "compute_stats",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "directive",
+    "placement": "before_statement",
+    "comment": "// SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.",
+    "annotated_code": "    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };",
+    "annotated_lines": [
+      23,
+      23
+    ],
+    "scope_lines": [
+      11,
+      33
+    ],
+    "enclosing_scope": "pub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean, /* inline /* nested */ remark */ variance)\n}",
+    "symbol": {
+      "name": "compute_stats",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "inline",
+    "placement": "trailing",
+    "comment": "// trailing remark about the divisor",
+    "annotated_code": "    let variance = if count > 0.0 { m2 / count } else { 0.0 }; ",
+    "annotated_lines": [
+      31,
+      31
+    ],
+    "scope_lines": [
+      11,
+      33
+    ],
+    "enclosing_scope": "pub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; \n    (mean, /* inline /* nested */ remark */ variance)\n}",
+    "symbol": {
+      "name": "compute_stats",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "inline",
+    "placement": "trailing",
+    "comment": "/* inline /* nested */ remark */",
+    "annotated_code": "    (mean,  variance)",
+    "annotated_lines": [
+      32,
+      32
+    ],
+    "scope_lines": [
+      11,
+      33
+    ],
+    "enclosing_scope": "pub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean,  variance)\n}",
+    "symbol": {
+      "name": "compute_stats",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "// init",
+    "annotated_code": "pub const SAMPLES: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];",
+    "annotated_lines": [
+      37,
+      37
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT\n\n//! A small stats helper.\n#![deny(missing_docs)]\n\n/// Computes a running mean and variance over a stream of numbers.\n///\n/// ```\n/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));\n/// ```\npub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean, /* inline /* nested */ remark */ variance)\n}\n\n/// Sample input.\npub const SAMPLES: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "rust",
+    "comment_kind": "api_doc",
+    "placement": "before_statement",
+    "comment": "/// Sample input.",
+    "annotated_code": "pub const SAMPLES: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];",
+    "annotated_lines": [
+      37,
+      37
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT\n\n//! A small stats helper.\n#![deny(missing_docs)]\n\n/// Computes a running mean and variance over a stream of numbers.\n///\n/// ```\n/// assert_eq!(sample::compute_stats(&[1.0, 3.0]), (2.0, 1.0));\n/// ```\npub fn compute_stats(samples: &[f64]) -> (f64, f64) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small crate without pulling in a math library.\n    let mut count = 0.0;\n    let mut mean = 0.0;\n    let mut m2 = 0.0;\n    let marker = \"// not a comment\";\n    let raw = r#\"/* not a comment */ \"quoted\" // either\"#;\n    // SAFETY: the bytes are an ASCII literal, so they are valid UTF-8.\n    let label = unsafe { std::str::from_utf8_unchecked(b\"// still not a comment\") };\n    for &value in samples {\n        count += 1.0;\n        let delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    let _ = (marker, raw, label, '/');\n    let variance = if count > 0.0 { m2 / count } else { 0.0 }; // trailing remark about the divisor\n    (mean, /* inline /* nested */ remark */ variance)\n}\n\n// init\npub const SAMPLES: [f64; 5] = [1.0, 2.0, 3.0, 4.0, 5.0];",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  }
+]

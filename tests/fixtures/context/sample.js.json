@@ -1,0 +1,101 @@
+[
+  {
+    "language": "javascript",
+    "comment_kind": "directive",
+    "placement": "module_head",
+    "comment": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT",
+    "annotated_code": "function computeStats(samples) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // eslint-disable-next-line no-unused-vars\n    const legacy = pattern.test(template);\n    for (const value of samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }",
+    "annotated_lines": [
+      3,
+      22
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "\nfunction computeStats(samples) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // eslint-disable-next-line no-unused-vars\n    const legacy = pattern.test(template);\n    for (const value of samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return [mean, variance];\n}\n\n// init\nconst result = computeStats([1, 2, 3, 4, 5]);\nconsole.log(result);",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "javascript",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "// This function walks the list of samples and computes a running mean and\n// a running variance using a numerically stable single-pass algorithm so\n// that we never have to keep the whole sample list around in memory. It\n// is deliberately written without any external dependencies so that it\n// can be dropped into any small script without pulling in a math library.",
+    "annotated_code": "    let count = 0;",
+    "annotated_lines": [
+      9,
+      9
+    ],
+    "scope_lines": [
+      3,
+      25
+    ],
+    "enclosing_scope": "function computeStats(samples) {\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // eslint-disable-next-line no-unused-vars\n    const legacy = pattern.test(template);\n    for (const value of samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return [mean, variance];\n}",
+    "symbol": {
+      "name": "computeStats",
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "javascript",
+    "comment_kind": "directive",
+    "placement": "before_statement",
+    "comment": "// eslint-disable-next-line no-unused-vars",
+    "annotated_code": "    const legacy = pattern.test(template);",
+    "annotated_lines": [
+      16,
+      16
+    ],
+    "scope_lines": [
+      3,
+      25
+    ],
+    "enclosing_scope": "function computeStats(samples) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    const legacy = pattern.test(template);\n    for (const value of samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return [mean, variance];\n}",
+    "symbol": {
+      "name": "computeStats",
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "javascript",
+    "comment_kind": "inline",
+    "placement": "trailing",
+    "comment": "// trailing remark about the divisor",
+    "annotated_code": "    const variance = count ? m2 / count : 0.0; ",
+    "annotated_lines": [
+      23,
+      23
+    ],
+    "scope_lines": [
+      3,
+      25
+    ],
+    "enclosing_scope": "function computeStats(samples) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // eslint-disable-next-line no-unused-vars\n    const legacy = pattern.test(template);\n    for (const value of samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; \n    return [mean, variance];\n}",
+    "symbol": {
+      "name": "computeStats",
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "javascript",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "// init",
+    "annotated_code": "const result = computeStats([1, 2, 3, 4, 5]);",
+    "annotated_lines": [
+      28,
+      28
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "// Copyright 2024 Example Corp. Licensed under the MIT License.\n// SPDX-License-Identifier: MIT\n\nfunction computeStats(samples) {\n    // This function walks the list of samples and computes a running mean and\n    // a running variance using a numerically stable single-pass algorithm so\n    // that we never have to keep the whole sample list around in memory. It\n    // is deliberately written without any external dependencies so that it\n    // can be dropped into any small script without pulling in a math library.\n    let count = 0;\n    let mean = 0.0;\n    let m2 = 0.0;\n    const marker = \"// not a comment\";\n    const template = `value is // not a comment either: ${marker}`;\n    const pattern = /\\/\\/ still not a comment/;\n    // eslint-disable-next-line no-unused-vars\n    const legacy = pattern.test(template);\n    for (const value of samples) {\n        count += 1;\n        const delta = value - mean;\n        mean += delta / count;\n        m2 += delta * (value - mean);\n    }\n    const variance = count ? m2 / count : 0.0; // trailing remark about the divisor\n    return [mean, variance];\n}\n\nconst result = computeStats([1, 2, 3, 4, 5]);\nconsole.log(result);",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  }
+]

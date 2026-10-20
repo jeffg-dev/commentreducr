@@ -1,2 +1,8 @@
 /target
 /.claude/
+
+# Private training data: never commit or publish
+/private/
+/tools/bakeoff/runs/
+/tools/dataset/v2/cache/
+__pycache__/

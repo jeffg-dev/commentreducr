@@ -1,0 +1,119 @@
+[
+  {
+    "language": "python",
+    "comment_kind": "directive",
+    "placement": "module_head",
+    "comment": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT",
+    "annotated_code": "\"\"\"Module docstring: a small stats helper, not a comment at all.\"\"\"\n\nimport math\n\n\ndef compute_stats(samples):\n    # This function walks the list of samples and computes a running mean and\n    # a running variance using a numerically stable single-pass algorithm so\n    # that we never have to keep the whole sample list around in memory. It\n    # is deliberately written without any external dependencies so that it\n    # can be dropped into any small script without pulling in numpy.\n    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  # noqa: E501\n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)",
+    "annotated_lines": [
+      3,
+      22
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "\n\"\"\"Module docstring: a small stats helper, not a comment at all.\"\"\"\n\nimport math\n\n\ndef compute_stats(samples):\n    # This function walks the list of samples and computes a running mean and\n    # a running variance using a numerically stable single-pass algorithm so\n    # that we never have to keep the whole sample list around in memory. It\n    # is deliberately written without any external dependencies so that it\n    # can be dropped into any small script without pulling in numpy.\n    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  # noqa: E501\n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)\n    variance = m2 / count if count else 0.0\n    return mean, variance  # trailing remark about the return shape\n\n\n# init\nresult = compute_stats([1, 2, 3, 4, 5])\nprint(result, math.sqrt(result[1]))",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "api_doc",
+    "placement": "module_head",
+    "comment": "\"\"\"Module docstring: a small stats helper, not a comment at all.\"\"\"",
+    "annotated_code": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n\n\nimport math\n\n\ndef compute_stats(samples):\n    # This function walks the list of samples and computes a running mean and\n    # a running variance using a numerically stable single-pass algorithm so\n    # that we never have to keep the whole sample list around in memory. It\n    # is deliberately written without any external dependencies so that it\n    # can be dropped into any small script without pulling in numpy.",
+    "annotated_lines": [
+      0,
+      13
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n\n\nimport math\n\n\ndef compute_stats(samples):\n    # This function walks the list of samples and computes a running mean and\n    # a running variance using a numerically stable single-pass algorithm so\n    # that we never have to keep the whole sample list around in memory. It\n    # is deliberately written without any external dependencies so that it\n    # can be dropped into any small script without pulling in numpy.\n    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  # noqa: E501\n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)\n    variance = m2 / count if count else 0.0\n    return mean, variance  # trailing remark about the return shape\n\n\n# init\nresult = compute_stats([1, 2, 3, 4, 5])\nprint(result, math.sqrt(result[1]))",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "# This function walks the list of samples and computes a running mean and\n# a running variance using a numerically stable single-pass algorithm so\n# that we never have to keep the whole sample list around in memory. It\n# is deliberately written without any external dependencies so that it\n# can be dropped into any small script without pulling in numpy.",
+    "annotated_code": "    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  # noqa: E501\n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)\n    variance = m2 / count if count else 0.0\n    return mean, variance  # trailing remark about the return shape",
+    "annotated_lines": [
+      14,
+      24
+    ],
+    "scope_lines": [
+      8,
+      24
+    ],
+    "enclosing_scope": "def compute_stats(samples):\n    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  # noqa: E501\n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)\n    variance = m2 / count if count else 0.0\n    return mean, variance  # trailing remark about the return shape",
+    "symbol": {
+      "name": "compute_stats",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "directive",
+    "placement": "trailing",
+    "comment": "# noqa: E501",
+    "annotated_code": "    marker = \"# not a comment\"  ",
+    "annotated_lines": [
+      17,
+      17
+    ],
+    "scope_lines": [
+      8,
+      24
+    ],
+    "enclosing_scope": "def compute_stats(samples):\n    # This function walks the list of samples and computes a running mean and\n    # a running variance using a numerically stable single-pass algorithm so\n    # that we never have to keep the whole sample list around in memory. It\n    # is deliberately written without any external dependencies so that it\n    # can be dropped into any small script without pulling in numpy.\n    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  \n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)\n    variance = m2 / count if count else 0.0\n    return mean, variance  # trailing remark about the return shape",
+    "symbol": {
+      "name": "compute_stats",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "inline",
+    "placement": "trailing",
+    "comment": "# trailing remark about the return shape",
+    "annotated_code": "    return mean, variance  ",
+    "annotated_lines": [
+      24,
+      24
+    ],
+    "scope_lines": [
+      8,
+      24
+    ],
+    "enclosing_scope": "def compute_stats(samples):\n    # This function walks the list of samples and computes a running mean and\n    # a running variance using a numerically stable single-pass algorithm so\n    # that we never have to keep the whole sample list around in memory. It\n    # is deliberately written without any external dependencies so that it\n    # can be dropped into any small script without pulling in numpy.\n    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  # noqa: E501\n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)\n    variance = m2 / count if count else 0.0\n    return mean, variance  ",
+    "symbol": {
+      "name": "compute_stats",
+      "public": true,
+      "is_test": false
+    }
+  },
+  {
+    "language": "python",
+    "comment_kind": "inline",
+    "placement": "before_statement",
+    "comment": "# init",
+    "annotated_code": "result = compute_stats([1, 2, 3, 4, 5])",
+    "annotated_lines": [
+      28,
+      28
+    ],
+    "scope_lines": null,
+    "enclosing_scope": "# Copyright 2024 Example Corp. Licensed under the MIT License.\n# SPDX-License-Identifier: MIT\n\n\"\"\"Module docstring: a small stats helper, not a comment at all.\"\"\"\n\nimport math\n\n\ndef compute_stats(samples):\n    # This function walks the list of samples and computes a running mean and\n    # a running variance using a numerically stable single-pass algorithm so\n    # that we never have to keep the whole sample list around in memory. It\n    # is deliberately written without any external dependencies so that it\n    # can be dropped into any small script without pulling in numpy.\n    count = 0\n    mean = 0.0\n    m2 = 0.0\n    marker = \"# not a comment\"  # noqa: E501\n    for value in samples:\n        count += 1\n        delta = value - mean\n        mean += delta / count\n        m2 += delta * (value - mean)\n    variance = m2 / count if count else 0.0\n    return mean, variance  # trailing remark about the return shape\n\n\nresult = compute_stats([1, 2, 3, 4, 5])\nprint(result, math.sqrt(result[1]))",
+    "symbol": {
+      "name": null,
+      "public": false,
+      "is_test": false
+    }
+  }
+]

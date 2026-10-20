@@ -1,12 +1,9 @@
 //! Inspect Python blocks in the committed trees Git is about to push.
-use crate::{docstring, parse, structural, types::Language};
+use crate::changeset::{self, SourceBlock, git_text, temp_file};
+use crate::{docstring, parse, structural, types::Language, types::Languages};
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashSet;
-use std::ffi::{OsStr, OsString};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone)]
 pub struct HookBlock {
@@ -17,315 +14,8 @@ pub struct HookBlock {
     pub kind: String,
     pub text: String,
     pub context: String,
-}
-
-fn git(repo: &Path, args: &[&OsStr]) -> Result<Output> {
-    Command::new("git")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .context("failed to run Git")
-}
-
-fn git_bytes(repo: &Path, args: &[&OsStr]) -> Result<Vec<u8>> {
-    let out = git(repo, args)?;
-    if !out.status.success() {
-        bail!(
-            "Git failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    Ok(out.stdout)
-}
-
-fn git_text(repo: &Path, args: &[&str]) -> Result<String> {
-    let args: Vec<&OsStr> = args.iter().map(OsStr::new).collect();
-    String::from_utf8(git_bytes(repo, &args)?).context("Git output was not UTF-8")
-}
-
-fn commit(repo: &Path, revision: &str) -> Result<String> {
-    git_text(
-        repo,
-        &[
-            "rev-parse",
-            "--verify",
-            "--end-of-options",
-            &format!("{revision}^{{commit}}"),
-        ],
-    )
-    .map(|s| s.trim().to_owned())
-}
-
-fn zero_oid(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|c| c == b'0')
-}
-
-/// Compare a new branch with the nearest common ancestor in known remote history. When no
-/// remote history is available (including a repository's first push), its whole tree is new.
-fn new_branch_base(repo: &Path, tip: &str, remote: Option<&str>) -> Result<Option<String>> {
-    let prefix = remote
-        .map(|r| format!("refs/remotes/{r}/"))
-        .unwrap_or_else(|| "refs/remotes/".to_owned());
-    let mut refs = git_text(repo, &["for-each-ref", "--format=%(objectname)", &prefix])?;
-    // Git uses the URL as its remote-name argument when pushing directly to a URL.
-    if refs.is_empty() && remote.is_some() {
-        refs = git_text(
-            repo,
-            &["for-each-ref", "--format=%(objectname)", "refs/remotes/"],
-        )?;
-    }
-    let mut best: Option<(usize, String)> = None;
-    for other in refs.lines().collect::<std::collections::BTreeSet<_>>() {
-        let out = git(
-            repo,
-            &[OsStr::new("merge-base"), OsStr::new(tip), OsStr::new(other)],
-        )?;
-        if out.status.code() == Some(1) {
-            continue; // Unrelated histories.
-        }
-        if !out.status.success() {
-            bail!(
-                "Git merge-base failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
-        }
-        let base = String::from_utf8(out.stdout)?.trim().to_owned();
-        let distance: usize = git_text(repo, &["rev-list", "--count", &format!("{base}..{tip}")])?
-            .trim()
-            .parse()?;
-        if best.as_ref().is_none_or(|(n, _)| distance < *n) {
-            best = Some((distance, base));
-        }
-    }
-    Ok(best.map(|(_, base)| base))
-}
-
-fn pushed_ranges(
-    repo: &Path,
-    input: Option<&str>,
-    remote: Option<&str>,
-) -> Result<Vec<(Option<String>, String)>> {
-    let Some(input) = input else {
-        let tip = commit(repo, "HEAD")?;
-        let upstream = git(
-            repo,
-            &[
-                OsStr::new("rev-parse"),
-                OsStr::new("--verify"),
-                OsStr::new("@{upstream}^{commit}"),
-            ],
-        )?;
-        let base = if upstream.status.success() {
-            Some(String::from_utf8(upstream.stdout)?.trim().to_owned())
-        } else {
-            new_branch_base(repo, &tip, remote)?
-        };
-        return Ok(vec![(base, tip)]);
-    };
-    let mut ranges = Vec::new();
-    for line in input.lines().filter(|line| !line.trim().is_empty()) {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() != 4
-            || !fields[1].bytes().all(|c| c.is_ascii_hexdigit())
-            || !fields[3].bytes().all(|c| c.is_ascii_hexdigit())
-        {
-            bail!("invalid Git pre-push ref line");
-        }
-        if zero_oid(fields[1]) {
-            continue; // Deleting a remote ref adds no blocks.
-        }
-        let tip = commit(repo, fields[1])?;
-        let base = if zero_oid(fields[3]) {
-            new_branch_base(repo, &tip, remote)?
-        } else {
-            Some(commit(repo, fields[3]).context(
-                "remote tip is unavailable locally; fetch the remote before checking this push",
-            )?)
-        };
-        if !ranges.contains(&(base.clone(), tip.clone())) {
-            ranges.push((base, tip));
-        }
-    }
-    Ok(ranges)
-}
-
-#[cfg(unix)]
-fn git_path(bytes: &[u8]) -> Result<PathBuf> {
-    use std::os::unix::ffi::OsStringExt;
-    Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
-}
-
-#[cfg(not(unix))]
-fn git_path(bytes: &[u8]) -> Result<PathBuf> {
-    Ok(PathBuf::from(std::str::from_utf8(bytes)?))
-}
-
-struct ChangedPath {
-    old: Option<PathBuf>,
-    new: PathBuf,
-}
-
-fn changed_paths(repo: &Path, base: Option<&str>, tip: &str) -> Result<Vec<ChangedPath>> {
-    let raw = if let Some(base) = base {
-        git_bytes(
-            repo,
-            &[
-                OsStr::new("diff"),
-                OsStr::new("--no-ext-diff"),
-                OsStr::new("--no-textconv"),
-                OsStr::new("--name-status"),
-                OsStr::new("--diff-filter=AMR"),
-                OsStr::new("--find-renames"),
-                OsStr::new("-z"),
-                OsStr::new(base),
-                OsStr::new(tip),
-            ],
-        )?
-    } else {
-        git_bytes(
-            repo,
-            &[
-                OsStr::new("ls-tree"),
-                OsStr::new("-r"),
-                OsStr::new("--name-only"),
-                OsStr::new("-z"),
-                OsStr::new(tip),
-            ],
-        )?
-    };
-    let mut fields = raw.split(|&b| b == 0).filter(|s| !s.is_empty());
-    let mut paths = Vec::new();
-    if base.is_none() {
-        for field in fields {
-            paths.push(ChangedPath {
-                old: None,
-                new: git_path(field)?,
-            });
-        }
-    } else {
-        while let Some(status) = fields.next() {
-            let first = git_path(
-                fields
-                    .next()
-                    .ok_or_else(|| anyhow!("missing Git diff path"))?,
-            )?;
-            let (old, new) = if status.starts_with(b"R") {
-                let new = git_path(
-                    fields
-                        .next()
-                        .ok_or_else(|| anyhow!("missing Git rename path"))?,
-                )?;
-                (Some(first), new)
-            } else if status == b"A" {
-                (None, first)
-            } else if status == b"M" {
-                (Some(first.clone()), first)
-            } else {
-                bail!("unexpected Git diff status");
-            };
-            paths.push(ChangedPath { old, new });
-        }
-    }
-    paths.retain(|p| Language::from_path(&p.new) == Some(Language::Python));
-    Ok(paths)
-}
-
-fn blob(repo: &Path, revision: &str, path: &Path) -> Result<String> {
-    let mut object = OsString::from(revision);
-    object.push(":");
-    object.push(path);
-    String::from_utf8(git_bytes(repo, &[OsStr::new("show"), &object])?)
-        .with_context(|| format!("{} is not UTF-8", path.display()))
-}
-
-#[derive(Clone, Copy)]
-struct Hunk {
-    old_start: usize,
-    old_count: usize,
-    new_start: usize,
-    new_count: usize,
-}
-
-fn line_range(token: &str) -> Result<(usize, usize)> {
-    let token = token.get(1..).ok_or_else(|| anyhow!("invalid Git hunk"))?;
-    let (start, count) = token.split_once(',').unwrap_or((token, "1"));
-    Ok((start.parse()?, count.parse()?))
-}
-
-fn hunks(repo: &Path, base: &str, tip: &str, path: &ChangedPath) -> Result<Vec<Hunk>> {
-    let mut args = vec![
-        OsString::from("diff"),
-        OsString::from("--no-ext-diff"),
-        OsString::from("--no-textconv"),
-        OsString::from("--no-color"),
-        OsString::from("--unified=0"),
-        OsString::from("--inter-hunk-context=0"),
-        OsString::from("--find-renames"),
-        OsString::from(base),
-        OsString::from(tip),
-        OsString::from("--"),
-    ];
-    for p in path.old.iter().chain(std::iter::once(&path.new)) {
-        let mut literal = OsString::from(":(literal)");
-        literal.push(p);
-        args.push(literal);
-    }
-    let args: Vec<&OsStr> = args.iter().map(OsString::as_os_str).collect();
-    let diff = git_bytes(repo, &args)?;
-    let mut out = Vec::new();
-    for line in diff
-        .split(|&b| b == b'\n')
-        .filter(|s| s.starts_with(b"@@ "))
-    {
-        let line = std::str::from_utf8(line)?;
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() < 4 || fields[3] != "@@" {
-            bail!("invalid Git diff hunk");
-        }
-        let (old_start, old_count) = line_range(fields[1])?;
-        let (new_start, new_count) = line_range(fields[2])?;
-        out.push(Hunk {
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-        });
-    }
-    Ok(out)
-}
-
-fn intersects(start: usize, end: usize, hunk_start: usize, count: usize) -> bool {
-    count > 0 && start <= hunk_start.saturating_add(count - 1) && end >= hunk_start
-}
-
-struct SourceBlock {
-    start: usize,
-    end: usize,
-    start_line: usize,
-    end_line: usize,
-    kind: String,
-    text: String,
-}
-
-fn changes_block(hunk: &Hunk, block: &SourceBlock, old_blocks: &[SourceBlock]) -> bool {
-    if hunk.new_count > 0 {
-        return intersects(
-            block.start_line,
-            block.end_line,
-            hunk.new_start,
-            hunk.new_count,
-        );
-    }
-    // A deletion has no added line, but can shorten a surviving block. A surviving line just
-    // before/after the deletion must belong to both the old and new versions of that block.
-    old_blocks.iter().any(|old| {
-        old.kind == block.kind
-            && intersects(old.start_line, old.end_line, hunk.old_start, hunk.old_count)
-            && ((old.start_line < hunk.old_start
-                && intersects(block.start_line, block.end_line, hunk.new_start, 1))
-                || (old.end_line >= hunk.old_start + hunk.old_count
-                    && intersects(block.start_line, block.end_line, hunk.new_start + 1, 1)))
-    })
+    /// `Added` or `Modified`.
+    pub tier: changeset::Tier,
 }
 
 fn source_blocks(
@@ -383,9 +73,10 @@ fn source_blocks(
 /// The enclosing function/class (including its header), or a nearby module neighborhood. Large
 /// scopes retain the header and forty lines on either side; the target itself is removed.
 fn context(source: &str, tree: &tree_sitter::Tree, block: &SourceBlock) -> String {
-    context_for_range(
+    crate::context::context_for_range(
         source,
         tree,
+        Language::Python,
         block.start,
         block.end,
         block.start_line,
@@ -393,220 +84,88 @@ fn context(source: &str, tree: &tree_sitter::Tree, block: &SourceBlock) -> Strin
     )
 }
 
-pub(crate) fn context_for_range(
-    source: &str,
-    tree: &tree_sitter::Tree,
-    start: usize,
-    end_byte: usize,
-    start_line: usize,
-    end_line: usize,
-) -> String {
-    let root = tree.root_node();
-    let mut scope = root;
-    let mut node = root.descendant_for_byte_range(start, end_byte);
-    while let Some(n) = node {
-        if matches!(n.kind(), "function_definition" | "class_definition") {
-            scope = n;
-            break;
-        }
-        node = n.parent();
-    }
-    let offsets: Vec<usize> = std::iter::once(0)
-        .chain(source.match_indices('\n').map(|(i, _)| i + 1))
-        .chain(std::iter::once(source.len()))
-        .collect();
-    let first = scope.start_position().row;
-    let last = scope.end_position().row.min(offsets.len() - 2);
-    let large = scope.kind() == "module" || last.saturating_sub(first) > 80;
-    let from = if large {
-        (start_line - 1).saturating_sub(40).max(first)
-    } else {
-        first
-    };
-    let to = if large {
-        (end_line - 1 + 40).min(last)
-    } else {
-        last
-    };
-    let begin = offsets[from];
-    let end = offsets[to + 1];
-    let mut result = String::new();
-    if from > first
-        && scope.kind() != "module"
-        && let Some(body) = scope.child_by_field_name("body")
-    {
-        result.push_str(source[scope.start_byte()..body.start_byte()].trim_end());
-        result.push('\n');
-    }
-    result.push_str(&source[begin..start]);
-    result.push_str(&source[end_byte..end]);
-    result.trim().to_owned()
-}
-
-static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-struct TempPath(PathBuf);
-
-impl Drop for TempPath {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
-fn temp_file(dir: &Path, stem: &str, content: &[u8]) -> Result<TempPath> {
-    let path = dir.join(format!(
-        "{stem}-{}-{}",
-        std::process::id(),
-        TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
-    let guard = TempPath(path);
-    file.write_all(content)?;
-    Ok(guard)
-}
-
-fn ignored_paths(
-    repo: &Path,
-    paths: &[ChangedPath],
-    patterns: &[String],
-) -> Result<HashSet<PathBuf>> {
-    if paths.is_empty() {
-        return Ok(HashSet::new());
-    }
-    let excludes = temp_file(
-        &std::env::temp_dir(),
-        "commentreducr-hook-ignore",
-        patterns.join("\n").as_bytes(),
-    )?;
-    let mut setting = OsString::from("core.excludesFile=");
-    setting.push(&excludes.0);
-    let mut child = Command::new("git")
-        .arg("-c")
-        .arg(setting)
-        .args(["check-ignore", "--no-index", "-z", "--stdin"])
-        .current_dir(repo)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to run Git check-ignore")?;
-    let mut input = Vec::new();
-    for path in paths {
-        input.extend_from_slice(path.new.as_os_str().as_encoded_bytes());
-        input.push(0);
-    }
-    let mut stdin = child.stdin.take().expect("piped stdin");
-    let writer = std::thread::spawn(move || stdin.write_all(&input));
-    let out = child.wait_with_output()?;
-    let _ = writer.join();
-    if !matches!(out.status.code(), Some(0 | 1)) {
-        bail!(
-            "Git check-ignore failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-    }
-    out.stdout
-        .split(|&b| b == 0)
-        .filter(|s| !s.is_empty())
-        .map(git_path)
-        .collect()
-}
-
 /// Some(input) is Git's pre-push stdin, including an empty list of refs. None checks
 /// upstream..HEAD, falling back to known remote history or the full tree on the first push.
 /// Returned targets are complete blocks; source bytes always come from committed Git blobs.
+/// `range` (`BASE..HEAD`) replaces `input` and `remote`. Also returns the number of changed
+/// non-Python files, which this path does not check.
 pub fn changed_blocks(
     repo: &Path,
+    range: Option<&str>,
     input: Option<&str>,
     remote: Option<&str>,
     ignore: &[String],
     keep_decorators: &[String],
     keep_bases: &[String],
-) -> Result<Vec<HookBlock>> {
-    let root =
-        PathBuf::from(git_text(repo, &["rev-parse", "--show-toplevel"])?.trim_end_matches('\n'));
-    let repo = root.as_path();
+) -> Result<(Vec<HookBlock>, usize)> {
+    let set = changeset::collect(repo, range, input, remote, Languages::Python, ignore)?;
     let mut output = Vec::new();
     let mut seen = HashSet::new();
-    for (base, tip) in pushed_ranges(repo, input, remote)? {
-        let paths = changed_paths(repo, base.as_deref(), &tip)?;
-        let ignored = ignored_paths(repo, &paths, ignore)?;
-        for path in paths.into_iter().filter(|p| !ignored.contains(&p.new)) {
-            let changes = if let Some(base) = &base {
-                hunks(repo, base, &tip, &path)?
-            } else {
-                vec![Hunk {
-                    old_start: 0,
-                    old_count: 0,
-                    new_start: 1,
-                    new_count: usize::MAX,
-                }]
-            };
-            if changes.is_empty() {
+    for file in &set.files {
+        let (path, source, changes) = (&file.path, &file.head_source, &file.hunks);
+        let blocks = source_blocks(source, path, keep_decorators, keep_bases, true)
+            .with_context(|| format!("{} in pushed tree", path.display()))?;
+        let old_blocks = match (&file.base_source, &file.old_path) {
+            // A previously broken file should not stop a push that repairs its syntax.
+            (Some(old_source), Some(old)) => {
+                source_blocks(old_source, old, keep_decorators, keep_bases, false)
+                    .unwrap_or_default()
+            }
+            _ => Vec::new(),
+        };
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_python::LANGUAGE.into())?;
+        let tree = parser
+            .parse(source, None)
+            .ok_or_else(|| anyhow!("Python parse failed"))?;
+        for block in blocks {
+            let relevant = changeset::changing_hunks(changes, &block, &old_blocks);
+            if relevant.is_empty() {
                 continue;
             }
-            let source = blob(repo, &tip, &path.new)?;
-            let blocks = source_blocks(&source, &path.new, keep_decorators, keep_bases, true)
-                .with_context(|| format!("{} in pushed tree", path.new.display()))?;
-            let old_blocks = if let (Some(base), Some(old)) = (&base, &path.old) {
-                let old_source = blob(repo, base, old)?;
-                // A previously broken file should not stop a push that repairs its syntax.
-                source_blocks(&old_source, old, keep_decorators, keep_bases, false)
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
-            let mut parser = tree_sitter::Parser::new();
-            parser.set_language(&tree_sitter_python::LANGUAGE.into())?;
-            let tree = parser
-                .parse(&source, None)
-                .ok_or_else(|| anyhow!("Python parse failed"))?;
-            for block in blocks {
-                let relevant: Vec<&Hunk> = changes
-                    .iter()
-                    .filter(|h| changes_block(h, &block, &old_blocks))
-                    .collect();
-                if relevant.is_empty() {
-                    continue;
-                }
-                // A changed code line may carry an unchanged trailing comment or inline docstring.
-                if relevant.iter().all(|h| {
-                    old_blocks.iter().any(|old| {
-                        old.kind == block.kind
-                            && old.text == block.text
-                            && intersects(old.start_line, old.end_line, h.old_start, h.old_count)
-                    })
-                }) {
-                    continue;
-                }
-                let ctx = context(&source, &tree, &block);
-                let key = (
-                    path.new.clone(),
-                    block.start_line,
-                    block.end_line,
-                    block.kind.clone(),
-                    block.text.clone(),
-                    ctx.clone(),
-                );
-                if seen.insert(key) {
-                    output.push(HookBlock {
-                        path: path.new.clone(),
-                        start_line: block.start_line,
-                        end_line: block.end_line,
-                        kind: block.kind,
-                        text: block.text,
-                        context: ctx,
-                    });
-                }
+            // shortcut: coarser than changeset::tier (no context); fine for a label on a finding.
+            let modified = old_blocks.iter().any(|o| {
+                o.kind == block.kind
+                    && (o.text == block.text
+                        || relevant.iter().any(|h| {
+                            changeset::intersects(
+                                o.start_line,
+                                o.end_line,
+                                h.old_start,
+                                h.old_count,
+                            )
+                        }))
+            });
+            let ctx = context(source, &tree, &block);
+            let key = (
+                path.clone(),
+                block.start_line,
+                block.end_line,
+                block.kind.clone(),
+                block.text.clone(),
+                ctx.clone(),
+            );
+            if seen.insert(key) {
+                output.push(HookBlock {
+                    path: path.clone(),
+                    start_line: block.start_line,
+                    end_line: block.end_line,
+                    kind: block.kind,
+                    text: block.text,
+                    context: ctx,
+                    tier: if modified {
+                        changeset::Tier::Modified
+                    } else {
+                        changeset::Tier::Added
+                    },
+                });
             }
         }
     }
-    Ok(output)
+    Ok((output, set.other_languages))
 }
 
+const HOOK_PREFIX: &str = "#!/bin/sh\n# commentreducr pre-push hook v";
 const HOOK_HEADER: &str = "#!/bin/sh\n# commentreducr pre-push hook v2\n";
 
 fn shell_quote(path: &Path) -> Result<String> {
@@ -641,8 +200,7 @@ pub fn install(repo: &Path) -> Result<PathBuf> {
             if std::fs::read_to_string(&path).is_ok_and(|s| s.starts_with(HOOK_HEADER)) {
                 return Ok(path);
             }
-            managed = std::fs::read_to_string(&path)
-                .is_ok_and(|s| s.starts_with("#!/bin/sh\n# commentreducr pre-push hook v1\n"));
+            managed = std::fs::read_to_string(&path).is_ok_and(|s| s.starts_with(HOOK_PREFIX));
             !managed
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => false,
@@ -690,49 +248,15 @@ pub fn install(repo: &Path) -> Result<PathBuf> {
 mod tests {
     use super::*;
 
-    struct Repo(PathBuf);
+    use crate::changeset::tests::Repo;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
 
-    impl Repo {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "commentreducr-hook-test-{}-{}",
-                std::process::id(),
-                TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-            ));
-            std::fs::create_dir_all(&path).unwrap();
-            let repo = Self(path);
-            repo.git(&["init", "-q", "-b", "main"]);
-            repo.git(&["config", "user.name", "Hook Test"]);
-            repo.git(&["config", "user.email", "hook-test@example.invalid"]);
-            repo
-        }
-
-        fn git(&self, args: &[&str]) -> String {
-            git_text(&self.0, args).unwrap()
-        }
-
-        fn write(&self, path: &str, text: &str) {
-            let path = self.0.join(path);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, text).unwrap();
-        }
-
-        fn commit(&self) -> String {
-            self.git(&["add", "-A"]);
-            self.git(&["commit", "-qm", "fixture"]);
-            self.git(&["rev-parse", "HEAD"]).trim().to_owned()
-        }
-
-        fn blocks(&self, old: &str, new: &str) -> Vec<HookBlock> {
-            let refs = format!("refs/heads/main {new} refs/heads/main {old}\n");
-            changed_blocks(&self.0, Some(&refs), Some("origin"), &[], &[], &[]).unwrap()
-        }
-    }
-
-    impl Drop for Repo {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
+    fn pushed(repo: &Repo, old: &str, new: &str) -> Vec<HookBlock> {
+        let refs = format!("refs/heads/main {new} refs/heads/main {old}\n");
+        changed_blocks(&repo.0, None, Some(&refs), Some("origin"), &[], &[], &[])
+            .unwrap()
+            .0
     }
 
     #[test]
@@ -752,7 +276,7 @@ mod tests {
             "file with spaces.py",
             "def broken(:\n# uncommitted comment\n",
         );
-        let blocks = repo.blocks(&base, &tip);
+        let blocks = pushed(&repo, &base, &tip);
         assert_eq!(blocks.len(), 2, "{blocks:?}");
         assert_eq!(blocks[0].kind, "function_docstring");
         assert_eq!(blocks[0].text, "Existing summary.\nChanged continuation.");
@@ -780,14 +304,14 @@ mod tests {
         let base = repo.commit();
         repo.write("original.py", "# existing narration\nx = 2\n");
         let deletion = repo.commit();
-        assert!(repo.blocks(&base, &deletion).is_empty());
+        assert!(pushed(&repo, &base, &deletion).is_empty());
         repo.git(&["mv", "original.py", "renamed [literal].py"]);
         let rename = repo.commit();
-        assert!(repo.blocks(&deletion, &rename).is_empty());
+        assert!(pushed(&repo, &deletion, &rename).is_empty());
         repo.write("renamed [literal].py", "# changed short narration\nx = 2\n");
         let modified = repo.commit();
         assert_eq!(
-            repo.blocks(&rename, &modified)[0].text,
+            pushed(&repo, &rename, &modified)[0].text,
             "# changed short narration"
         );
     }
@@ -822,7 +346,7 @@ mod tests {
                 let remainder = target.replace(&deleted, "");
                 repo.write("file.py", &source(&remainder));
                 let tip = repo.commit();
-                let blocks = repo.blocks(&base, &tip);
+                let blocks = pushed(&repo, &base, &tip);
                 assert_eq!(blocks.len(), 1, "{kind} removing {removed}: {blocks:?}");
                 assert_eq!(blocks[0].kind, kind);
                 assert!(!blocks[0].text.contains(removed));
@@ -830,7 +354,7 @@ mod tests {
                 // Removing the entire block should not select the unrelated surviving comment.
                 repo.write("file.py", &source(""));
                 let removed_whole = repo.commit();
-                assert!(repo.blocks(&tip, &removed_whole).is_empty());
+                assert!(pushed(&repo, &tip, &removed_whole).is_empty());
             }
         }
     }
@@ -855,13 +379,16 @@ mod tests {
         let input = format!(
             "refs/heads/topic {topic} refs/heads/topic {base}\nrefs/heads/other {other} refs/heads/other {base}\nrefs/heads/topic {topic} refs/heads/duplicate {base}\n(delete) {zero} refs/heads/deleted {base}\n"
         );
-        let blocks = changed_blocks(&repo.0, Some(&input), Some("origin"), &[], &[], &[]).unwrap();
+        let blocks = changed_blocks(&repo.0, None, Some(&input), Some("origin"), &[], &[], &[])
+            .unwrap()
+            .0;
         assert_eq!(blocks.len(), 2, "{blocks:?}");
         assert!(blocks.iter().any(|b| b.text == "# short new comment"));
         assert!(blocks.iter().any(|b| b.kind == "test_docstring"));
         assert!(
-            changed_blocks(&repo.0, Some(""), Some("origin"), &[], &[], &[])
+            changed_blocks(&repo.0, None, Some(""), Some("origin"), &[], &[], &[])
                 .unwrap()
+                .0
                 .is_empty()
         );
     }
@@ -872,8 +399,9 @@ mod tests {
         repo.write("file.py", "# old narration\nx = 1\n");
         let base = repo.commit();
         assert_eq!(
-            changed_blocks(&repo.0, None, None, &[], &[], &[])
+            changed_blocks(&repo.0, None, None, None, &[], &[], &[])
                 .unwrap()
+                .0
                 .len(),
             1
         );
@@ -884,28 +412,42 @@ mod tests {
         let tip = repo.commit();
         let zero = "0".repeat(40);
         let new_branch = format!("refs/heads/new {tip} refs/heads/new {zero}\n");
-        let blocks =
-            changed_blocks(&repo.0, Some(&new_branch), Some("origin"), &[], &[], &[]).unwrap();
+        let blocks = changed_blocks(
+            &repo.0,
+            None,
+            Some(&new_branch),
+            Some("origin"),
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap()
+        .0;
         assert_eq!(blocks.len(), 1);
         assert_eq!(blocks[0].text, "# new narration");
         let direct_url = changed_blocks(
             &repo.0,
+            None,
             Some(&new_branch),
             Some("/direct-push-url"),
             &[],
             &[],
             &[],
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(direct_url.len(), 1);
         assert_eq!(direct_url[0].text, "# new narration");
-        let manual = changed_blocks(&repo.0, None, None, &[], &[], &[]).unwrap();
+        let manual = changed_blocks(&repo.0, None, None, None, &[], &[], &[])
+            .unwrap()
+            .0;
         assert_eq!(manual.len(), 1);
         assert_eq!(manual[0].text, "# new narration");
         repo.git(&["checkout", "-qb", "without-upstream"]);
         assert_eq!(
-            changed_blocks(&repo.0, None, None, &[], &[], &[])
+            changed_blocks(&repo.0, None, None, None, &[], &[], &[])
                 .unwrap()
+                .0
                 .len(),
             1
         );
@@ -925,11 +467,13 @@ mod tests {
             &repo.0,
             None,
             None,
+            None,
             &["vendor/".to_owned()],
             &["tool".to_owned()],
             &["Signature".to_owned()],
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(blocks.len(), 2, "{blocks:?}");
         assert!(blocks.iter().any(|b| b.text == "# short narration"));
         assert!(
@@ -1038,6 +582,27 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(hooks.join("pre-push.commentreducr-original")).unwrap(),
             original
+        );
+    }
+
+    #[test]
+    fn install_recognises_any_managed_version() {
+        let repo = Repo::new();
+        let installed = install(&repo.0).unwrap();
+        let old = std::fs::read_to_string(&installed)
+            .unwrap()
+            .replace("pre-push hook v2", "pre-push hook v1");
+        std::fs::write(&installed, old).unwrap();
+        install(&repo.0).unwrap();
+        assert!(
+            !installed
+                .with_file_name("pre-push.commentreducr-original")
+                .exists()
+        );
+        assert!(
+            std::fs::read_to_string(&installed)
+                .unwrap()
+                .starts_with(HOOK_HEADER)
         );
     }
 }

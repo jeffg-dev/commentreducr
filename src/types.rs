@@ -117,6 +117,15 @@ impl Languages {
     }
 }
 
+/// Which verdict path `reduce` takes. `Legacy` is the original prompt path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum JudgeKind {
+    Legacy,
+    #[value(name = "systemone")]
+    SystemOne,
+    Generative,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub target: Target,
@@ -145,4 +154,29 @@ pub struct Config {
     /// subclasses' docstrings, are never touched (dspy.Signature, pydantic.BaseModel). Shipped
     /// default plus whatever the user's config file appends.
     pub keep_bases: Vec<String>,
+    pub judge: JudgeKind,
+    /// Full URL of the judge. `None` derives it from `endpoint` (see `judge_url`).
+    pub judge_endpoint: Option<String>,
+    pub judge_model: String,
+    /// Model that writes verified rewrites (System One only), at `endpoint`.
+    pub generator_model: String,
+    /// Stronger model for escalation; `None` means no escalation.
+    pub escalation_model: Option<String>,
+    /// Contents of the `judge_thresholds` JSON file, merged over the embedded thresholds.
+    pub judge_thresholds: Option<String>,
+    /// `reduce --ai`: apply only certain deletes and report everything else as JSONL for an agent.
+    pub ai: bool,
+}
+
+impl Config {
+    /// `judge_endpoint` if set, else `{endpoint}/systemone` for SystemOne and `{endpoint}` otherwise.
+    pub fn judge_url(&self) -> String {
+        self.judge_endpoint.clone().unwrap_or_else(|| {
+            let base = self.endpoint.trim_end_matches('/');
+            match self.judge {
+                JudgeKind::SystemOne => format!("{base}/systemone"),
+                _ => self.endpoint.clone(),
+            }
+        })
+    }
 }

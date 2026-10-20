@@ -1,0 +1,66 @@
+{
+  "a.py": [
+    {
+      "before": null,
+      "line": 7,
+      "tier": "modified"
+    },
+    {
+      "before": "    result = sum(x for x in items if x > 0)\n    return result",
+      "line": 13,
+      "tier": "scope_changed"
+    },
+    {
+      "before": "    count = len(out)",
+      "line": 20,
+      "tier": "scope_changed"
+    },
+    {
+      "before": null,
+      "line": 26,
+      "tier": "untouched"
+    },
+    {
+      "before": null,
+      "line": 30,
+      "tier": "untouched"
+    },
+    {
+      "before": "    capacity = 10\n    # Name shown in log lines.\n    name = \"store\"\n\n    def put(self, key, value):\n        self.data[key] = value\n\n    def get(self, key):\n        return self.data.get(key)",
+      "line": 35,
+      "tier": "scope_changed"
+    },
+    {
+      "before": null,
+      "line": 37,
+      "tier": "untouched"
+    },
+    {
+      "before": "    return min(x, MAX)  ",
+      "line": 48,
+      "tier": "scope_changed"
+    },
+    {
+      "before": null,
+      "line": 52,
+      "tier": "added"
+    }
+  ],
+  "b.ts": [
+    {
+      "before": "  return w * h;",
+      "line": 2,
+      "tier": "scope_changed"
+    },
+    {
+      "before": null,
+      "line": 7,
+      "tier": "untouched"
+    },
+    {
+      "before": null,
+      "line": 12,
+      "tier": "added"
+    }
+  ]
+}

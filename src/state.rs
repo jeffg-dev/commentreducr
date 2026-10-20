@@ -102,8 +102,9 @@ impl Database {
         let connection = Connection::open(&path)?;
         connection.busy_timeout(std::time::Duration::from_secs(2))?;
         let version: i64 = connection.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        // Version 2 came from a pre-release build; its schema is the same, so it opens as 1.
         ensure!(
-            version <= 1,
+            version <= 2,
             "unsupported commentreducr database version {version}"
         );
         connection.execute_batch(
@@ -126,6 +127,11 @@ impl Database {
                 after_hash TEXT NOT NULL, after_source TEXT, item_ids TEXT NOT NULL,
                 state TEXT NOT NULL, PRIMARY KEY(file, settings)
             );
+            CREATE TABLE IF NOT EXISTS states (
+                item_id INTEGER PRIMARY KEY, state TEXT NOT NULL, context TEXT NOT NULL,
+                evidence TEXT NOT NULL, answers TEXT, verdict TEXT, judge TEXT
+            );
+            -- Stays 1: the states table is additive, and older binaries reject anything newer.
             PRAGMA user_version=1;",
         )?;
         #[cfg(unix)]
@@ -190,6 +196,50 @@ impl Database {
             record.result_type = Some("keep".into());
         }
         Ok(record)
+    }
+
+    pub(crate) fn store_state(
+        &self,
+        item_id: i64,
+        state: &str,
+        context: &str,
+        evidence: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            // Upsert, not REPLACE: a cached verdict's stored answers must survive a re-plan.
+            "INSERT INTO states(item_id, state, context, evidence) VALUES (?1,?2,?3,?4) \
+             ON CONFLICT(item_id) DO UPDATE SET state=excluded.state, context=excluded.context, evidence=excluded.evidence",
+            params![item_id, state, context, evidence],
+        )?;
+        Ok(())
+    }
+
+    /// The judge's answers, policy verdict and backend name for an item's stored state.
+    pub(crate) fn store_answers(
+        &self,
+        item_id: i64,
+        answers: &str,
+        verdict: &str,
+        judge: &str,
+    ) -> Result<()> {
+        self.connection.execute(
+            "UPDATE states SET answers=?2, verdict=?3, judge=?4 WHERE item_id=?1",
+            params![item_id, answers, verdict, judge],
+        )?;
+        Ok(())
+    }
+
+    /// The stored answers ledger of an item, if it was judged.
+    pub(crate) fn answers(&self, item_id: i64) -> Result<Option<serde_json::Value>> {
+        let text: Option<Option<String>> = self
+            .connection
+            .query_row(
+                "SELECT answers FROM states WHERE item_id=?1",
+                [item_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(text.flatten().and_then(|t| serde_json::from_str(&t).ok()))
     }
 
     pub(crate) fn running(&self, id: i64) -> Result<()> {
@@ -277,6 +327,30 @@ impl Database {
 mod tests {
     use super::*;
     #[test]
+    fn schema_version_stays_1_and_a_version_2_database_opens() {
+        let path = std::env::temp_dir().join(format!(
+            "commentreducr-version-{}.sqlite",
+            std::process::id()
+        ));
+        let version = |db: &Database| -> i64 {
+            db.connection
+                .pragma_query_value(None, "user_version", |r| r.get(0))
+                .unwrap()
+        };
+        let db = Database::open(Path::new("."), Some(&path)).unwrap();
+        assert_eq!(version(&db), 1);
+        db.connection
+            .execute_batch("PRAGMA user_version=2;")
+            .unwrap();
+        drop(db);
+        let db = Database::open(Path::new("."), Some(&path)).unwrap();
+        assert_eq!(version(&db), 1);
+        drop(db);
+        for suffix in ["", "-wal", "-shm", ".lock"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+        }
+    }
+    #[test]
     fn durable_checkpoints_recover_both_write_boundaries_and_reject_changed_source() {
         let dir = std::env::temp_dir().join(format!(
             "commentreducr-state-{}-{}",
@@ -357,6 +431,19 @@ mod tests {
             None
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "value = 2\n");
+        db.store_state(record.id, "language: python", "{}", "{}")
+            .unwrap();
+        db.store_state(record.id, "language: python 2", "{}", "{}")
+            .unwrap();
+        let stored: String = db
+            .connection
+            .query_row(
+                "SELECT state FROM states WHERE item_id=?1",
+                [record.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(stored, "language: python 2");
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }

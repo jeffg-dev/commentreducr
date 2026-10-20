@@ -1,0 +1,122 @@
+{
+  "version": "strict-v0-paraphrase",
+  "applies_to": {"c5_contract": "api_doc", "c10_actionable": "todo"},
+  "questions": {
+    "kind": {
+      "type": "choice",
+      "instructions": "Which category best describes `comment`?",
+      "criteria": {
+        "rationale": "Gives the reason behind `annotated_code`.",
+        "summary": "Describes the purpose of `annotated_code` more abstractly than the code itself.",
+        "contract": "Tells callers of `symbol` what they can rely on.",
+        "invariant": "Pins down an exact detail the code leaves implicit, such as units, meaning or an invariant.",
+        "warning": "Flags a pitfall, a risk, a required order, or a units problem.",
+        "alternatives_rejected": "Mentions another approach and why it was not used.",
+        "todo": "Marks pending work with TODO, FIXME, HACK or XXX.",
+        "directive": "An instruction to a tool such as a linter, formatter or type checker.",
+        "restating": "Repeats `annotated_code` in prose without going above or below its level.",
+        "commented_out_code": "Source code switched off by turning it into a comment.",
+        "journal_or_history": "Records dates, tickets, authors, or earlier behaviour of the code.",
+        "banner": "Marks a section, or labels the end of a block.",
+        "cross_reference_leak": "Justifies this code by pointing at what some other module, file or caller needs or copies.",
+        "change_narration": "Describes the edit that added it instead of describing the code, e.g. 'replaced the list with a dict since lookups were O(n)'."
+      }
+    },
+    "g1_contradicts": {
+      "type": "noul",
+      "instructions": "Is something `comment` claims shown false by `annotated_code` or `enclosing_scope`, because the code does the reverse or has stopped doing it?"
+    },
+    "g1_unverifiable": {
+      "type": "noul",
+      "instructions": "Does `comment` assert some behaviour that cannot be checked against `annotated_code` or `enclosing_scope`, for example about an outside service or an earlier incident, with none of its claims refuted by the code?"
+    },
+    "hazard": {
+      "type": "noul",
+      "instructions": "Would a capable reader seeing `annotated_code` for the first time miss something that `comment` points out: a pitfall, a risk, a required order, a units mismatch, an outside quirk, or a requirement on callers? Threading or reentrancy limits, security or data-loss effects, and workarounds for bugs elsewhere qualify. Merely helpful context does not."
+    },
+    "c2_info_gain": {
+      "type": "score",
+      "instructions": "Beyond what the identifiers, types and statements of `annotated_code` already convey, how much new information does `comment` give?",
+      "criteria": [
+        "Nothing new; it repeats the code, as in `i += 1  # increment i`.",
+        "The same content in different words.",
+        "One fact that the code itself cannot express.",
+        "Facts that stay hidden even from someone who reads every line of `enclosing_scope`."
+      ]
+    },
+    "c3_rationale": {
+      "type": "score",
+      "instructions": "How well does `comment` give the reason for `annotated_code`? When no reason is called for, as with an accurate contract, choose level 2.",
+      "criteria": [
+        "No reason given, or a reason is needed and missing.",
+        "A hand-wavy reason, such as 'faster this way'.",
+        "A concrete reason, such as 'wait 250 ms because the vendor allows only 5 requests per second'.",
+        "A concrete reason together with the option that was turned down or what would break if it changed."
+      ]
+    },
+    "c4_level": {
+      "type": "choice",
+      "instructions": "Compared with `annotated_code`, how abstract is `comment`?",
+      "criteria": {
+        "same_level_narration": "Walks through the code at exactly the code's own level.",
+        "higher_summary": "Condenses the code into a more abstract description.",
+        "lower_precision": "Goes more precise than the code: exact semantics, invariants, units.",
+        "mental_model": "Supplies a way of thinking about the problem the code itself does not convey."
+      }
+    },
+    "c8_durability": {
+      "type": "score",
+      "instructions": "If code near `comment` is edited, how easily does `comment` go stale?",
+      "criteria": [
+        "Embeds fragile specifics: line numbers, values copied from the code, internals of other files.",
+        "Correct for now but depends on details that are often edited.",
+        "Describes a lasting purpose or constraint.",
+        "Lasting and enforced by a tool (doctest, assertion, type), or pointing at a permanent record."
+      ]
+    },
+    "c9_replaceable": {
+      "type": "choice",
+      "instructions": "Could what `comment` says be expressed in the code itself through a better name, a type, an assertion, or a helper function?",
+      "criteria": {
+        "fully": "Entirely: you could name the identifier, type, assertion or helper that makes `comment` redundant.",
+        "partly": "Some of `comment` could move into the code and some could not.",
+        "no": "Not at all: `comment` holds a reason, history, an outside constraint, or an invariant that spans modules."
+      }
+    },
+    "leak": {
+      "type": "noul",
+      "instructions": "Does `comment` justify this code by referring to a specific other module, file, caller or sibling and what that one needs, depends on or copies? A requirement that applies to any caller, like 'acquire the lock first', does not count."
+    },
+    "c5_contract": {
+      "type": "score",
+      "instructions": "Using only `comment`, could someone call `symbol` correctly?",
+      "criteria": [
+        "It repeats the signature and nothing more.",
+        "It gives only a one-line description.",
+        "It covers parameters, return value and errors.",
+        "It also covers side effects, units, ownership or thread-safety, or includes an example."
+      ]
+    },
+    "c10_actionable": {
+      "type": "score",
+      "instructions": "How much does the TODO in `comment` give someone to act on?",
+      "criteria": [
+        "No problem named, as in 'TODO fix this'.",
+        "Names the problem.",
+        "Names the problem and gives an owner or a ticket id.",
+        "Names the problem, an owner, a ticket id, and when it can be considered done."
+      ]
+    },
+    "verdict": {
+      "type": "choice",
+      "instructions": "Applying the strict policy, what is the right action for `comment`? An inline comment is kept only when it gives a hazard, a real contract, or a concrete reason the code cannot express. A doc comment (`comment_kind` api_doc) is kept only when it gives a contract a caller depends on. Anything the code contradicts is not kept. Length alone never removes a doc comment; repeating the signature does.",
+      "criteria": {
+        "keep": "Leave it: it is already short and justified.",
+        "rewrite_shorter": "It is justified but goes beyond the hazard or contract, or phrases it in terms of another module; replace it with a shorter version in this code's own terms.",
+        "delete": "Remove it: it repeats the code; or it is a restatement, disabled code, history, a banner, or narration of a change; or it points elsewhere without a hazard; or it is an inline comment with neither a hazard nor a concrete reason; or it is a doc comment that only repeats the signature.",
+        "rename_instead": "A better name, type, assertion or helper function would make it completely redundant.",
+        "fix_wrong_claim": "The code refutes it, but something correct can still be said; if nothing correct is left, choose delete instead."
+      }
+    }
+  }
+}

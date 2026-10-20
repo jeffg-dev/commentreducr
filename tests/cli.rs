@@ -859,3 +859,132 @@ fn language_and_scope_filters_combine_and_flags_override_config() {
     .success();
     assert_eq!(read(dir.path(), "item.py"), "def f():\n    return 1\n");
 }
+
+#[test]
+fn dump_items_lists_comments_and_docstrings_as_json() {
+    let dir = TempDir::new();
+    let file = dir.path().join("a.py");
+    std::fs::write(
+        &file,
+        "\"\"\"Module doc.\"\"\"\n# set x to one\nx = 1\n# TODO: drop y\ny = 2\n",
+    )
+    .unwrap();
+    let out = commentreducr()
+        .args(["reduce", "--dump-items"])
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: Vec<_> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["module_docstring", "comment", "comment"]);
+    assert_eq!(rows[1]["start_line"], 2);
+    // Structural items are listed too, marked, so the dataset can find them.
+    assert_eq!(rows[1]["structural"], false);
+    assert_eq!(rows[2]["structural"], true);
+}
+
+#[test]
+fn dump_items_includes_context() {
+    let dir = TempDir::new();
+    let dump = |name: &str, src: &str| {
+        let file = dir.path().join(name);
+        std::fs::write(&file, src).unwrap();
+        let out = commentreducr()
+            .args(["reduce", "--dump-items"])
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&out.stdout).unwrap()
+    };
+    let rows = [
+        dump("a.py", "def f():\n    # set x to one\n    x = 1\n"),
+        dump("a.rs", "fn f() {\n    // set x to one\n    let x = 1;\n}\n"),
+    ];
+    for row in rows.iter().map(|r| &r[0]) {
+        for key in [
+            "language",
+            "comment_kind",
+            "placement",
+            "comment",
+            "annotated_code",
+            "enclosing_scope",
+            "symbol",
+        ] {
+            assert!(row.get(key).is_some(), "missing {key}: {row}");
+        }
+        assert_eq!(row["placement"], "before_statement");
+    }
+    assert_eq!(rows[0][0]["language"], "python");
+    assert_eq!(rows[1][0]["language"], "rust");
+    assert_eq!(rows[0][0]["symbol"]["name"], "f");
+    assert!(rows[0][0]["evidence"].is_object());
+    assert!(
+        rows[0][0]["state"]
+            .as_str()
+            .unwrap()
+            .starts_with("language: python")
+    );
+}
+
+fn git_c(dir: &Path, args: &[&str]) {
+    git(
+        dir,
+        &[
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "commit.gpgsign=false",
+            ],
+            args,
+        ]
+        .concat(),
+    );
+}
+
+#[test]
+fn changed_flag_validates_and_respects_target() {
+    let dir = setup_repo();
+    run(commentreducr()
+        .args(["reduce", "--changed", "nope..HEAD"])
+        .arg(dir.path()))
+    .failure()
+    .stderr_contains("unknown revision");
+    run(commentreducr()
+        .args(["delete", "--changed", "HEAD..HEAD"])
+        .arg(dir.path()))
+    .failure()
+    .stderr_contains("--changed only applies to reduce");
+
+    // A changed file outside the target subdirectory is not planned or touched.
+    std::fs::create_dir(dir.path().join("sub")).unwrap();
+    std::fs::write(dir.path().join("sub/x.py"), "x = 1\n").unwrap();
+    git_c(dir.path(), &["add", "-A"]);
+    git_c(dir.path(), &["commit", "-q", "-m", "sub"]);
+    let outside = read(dir.path(), FIXTURES[0].name);
+    std::fs::write(dir.path().join(FIXTURES[0].name), format!("{outside}\n")).unwrap();
+    git_c(dir.path(), &["commit", "-qam", "touch"]);
+    let before = read(dir.path(), FIXTURES[0].name);
+    run(commentreducr()
+        .args(["reduce", "--changed", "HEAD~2..HEAD"])
+        .arg(dir.path().join("sub")))
+    .success();
+    assert_eq!(read(dir.path(), FIXTURES[0].name), before);
+}

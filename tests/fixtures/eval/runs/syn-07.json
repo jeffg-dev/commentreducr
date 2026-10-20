@@ -1,0 +1,11 @@
+{
+ "id": "syn-07",
+ "judge": "generative",
+ "answers": {},
+ "verdict": "rewrite_shorter",
+ "rewrite": null,
+ "latency_ms": 2000,
+ "input_tokens": null,
+ "raw": null,
+ "rewrite_scores": null
+}

@@ -1,0 +1,267 @@
+[
+ {
+  "name": "plain",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "class Cache:\n    def set(self, k, v):\n        # hold the lock: the refresher thread writes _cache\n        with self._lock:\n            self._cache[k] = v",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 3000
+ },
+ {
+  "name": "all_null",
+  "row": {
+   "language": null,
+   "comment_kind": null,
+   "placement": null,
+   "comment": "# x",
+   "annotated_code": "",
+   "enclosing_scope": "",
+   "symbol": {
+    "name": null,
+    "public": null,
+    "is_test": null
+   },
+   "change": {
+    "authored_by_agent": null,
+    "agent": null,
+    "comment_age_days": null,
+    "code_newer_than_comment": null
+   }
+  },
+  "max_tokens": 3000
+ },
+ {
+  "name": "evidence",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "class Cache:\n    def set(self, k, v):\n        # hold the lock: the refresher thread writes _cache\n        with self._lock:\n            self._cache[k] = v",
+   "symbol": {
+    "name": "Cache.set",
+    "public": false,
+    "is_test": true
+   },
+   "change": {
+    "authored_by_agent": true,
+    "agent": "claude-code",
+    "comment_age_days": 412,
+    "code_newer_than_comment": false
+   }
+  },
+  "max_tokens": 3000
+ },
+ {
+  "name": "evidence_partial",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "class Cache:\n    def set(self, k, v):\n        # hold the lock: the refresher thread writes _cache\n        with self._lock:\n            self._cache[k] = v",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   },
+   "change": {
+    "authored_by_agent": false,
+    "agent": null,
+    "comment_age_days": 0,
+    "code_newer_than_comment": null
+   }
+  },
+  "max_tokens": 3000
+ },
+ {
+  "name": "trim_scope",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "    x0 = 0\n    x1 = 1\n    x2 = 2\n    x3 = 3\n    x4 = 4\n    x5 = 5\n    x6 = 6\n    x7 = 7\n    x8 = 8\n    x9 = 9\n    x10 = 10\n    x11 = 11\n    x12 = 12\n    x13 = 13\n    x14 = 14\n    x15 = 15\n    x16 = 16\n    x17 = 17\n    x18 = 18\n    x19 = 19\n    x20 = 20\n    x21 = 21\n    x22 = 22\n    x23 = 23\n    x24 = 24\n    x25 = 25\n    x26 = 26\n    x27 = 27\n    x28 = 28\n    x29 = 29\n    x30 = 30\n    x31 = 31\n    x32 = 32\n    x33 = 33\n    x34 = 34\n    x35 = 35\n    x36 = 36\n    x37 = 37\n    x38 = 38\n    x39 = 39\n    x40 = 40\n    x41 = 41\n    x42 = 42\n    x43 = 43\n    x44 = 44\n    x45 = 45\n    x46 = 46\n    x47 = 47\n    x48 = 48\n    x49 = 49\n    x50 = 50\n    x51 = 51\n    x52 = 52\n    x53 = 53\n    x54 = 54\n    x55 = 55\n    x56 = 56\n    x57 = 57\n    x58 = 58\n    x59 = 59\n    x60 = 60\n    x61 = 61\n    x62 = 62\n    x63 = 63\n    x64 = 64\n    x65 = 65\n    x66 = 66\n    x67 = 67\n    x68 = 68\n    x69 = 69\n    x70 = 70\n    x71 = 71\n    x72 = 72\n    x73 = 73\n    x74 = 74\n    x75 = 75\n    x76 = 76\n    x77 = 77\n    x78 = 78\n    x79 = 79\n    x80 = 80\n    x81 = 81\n    x82 = 82\n    x83 = 83\n    x84 = 84\n    x85 = 85\n    x86 = 86\n    x87 = 87\n    x88 = 88\n    x89 = 89\n    x90 = 90\n    x91 = 91\n    x92 = 92\n    x93 = 93\n    x94 = 94\n    x95 = 95\n    x96 = 96\n    x97 = 97\n    x98 = 98\n    x99 = 99\n    x100 = 100\n    x101 = 101\n    x102 = 102\n    x103 = 103\n    x104 = 104\n    x105 = 105\n    x106 = 106\n    x107 = 107\n    x108 = 108\n    x109 = 109\n    x110 = 110\n    x111 = 111\n    x112 = 112\n    x113 = 113\n    x114 = 114\n    x115 = 115\n    x116 = 116\n    x117 = 117\n    x118 = 118\n    x119 = 119\n    x120 = 120\n    x121 = 121\n    x122 = 122\n    x123 = 123\n    x124 = 124\n    x125 = 125\n    x126 = 126\n    x127 = 127\n    x128 = 128\n    x129 = 129\n    x130 = 130\n    x131 = 131\n    x132 = 132\n    x133 = 133\n    x134 = 134\n    x135 = 135\n    x136 = 136\n    x137 = 137\n    x138 = 138\n    x139 = 139\n    x140 = 140\n    x141 = 141\n    x142 = 142\n    x143 = 143\n    x144 = 144\n    x145 = 145\n    x146 = 146\n    x147 = 147\n    x148 = 148\n    x149 = 149\n    x150 = 150\n    x151 = 151\n    x152 = 152\n    x153 = 153\n    x154 = 154\n    x155 = 155\n    x156 = 156\n    x157 = 157\n    x158 = 158\n    x159 = 159\n    x160 = 160\n    x161 = 161\n    x162 = 162\n    x163 = 163\n    x164 = 164\n    x165 = 165\n    x166 = 166\n    x167 = 167\n    x168 = 168\n    x169 = 169\n    x170 = 170\n    x171 = 171\n    x172 = 172\n    x173 = 173\n    x174 = 174\n    x175 = 175\n    x176 = 176\n    x177 = 177\n    x178 = 178\n    x179 = 179\n    x180 = 180\n    x181 = 181\n    x182 = 182\n    x183 = 183\n    x184 = 184\n    x185 = 185\n    x186 = 186\n    x187 = 187\n    x188 = 188\n    x189 = 189\n    x190 = 190\n    x191 = 191\n    x192 = 192\n    x193 = 193\n    x194 = 194\n    x195 = 195\n    x196 = 196\n    x197 = 197\n    x198 = 198\n    x199 = 199\n    with self._lock:\n        self._cache[k] = v\n    y0 = 0\n    y1 = 1\n    y2 = 2\n    y3 = 3\n    y4 = 4\n    y5 = 5\n    y6 = 6\n    y7 = 7\n    y8 = 8\n    y9 = 9\n    y10 = 10\n    y11 = 11\n    y12 = 12\n    y13 = 13\n    y14 = 14\n    y15 = 15\n    y16 = 16\n    y17 = 17\n    y18 = 18\n    y19 = 19\n    y20 = 20\n    y21 = 21\n    y22 = 22\n    y23 = 23\n    y24 = 24\n    y25 = 25\n    y26 = 26\n    y27 = 27\n    y28 = 28\n    y29 = 29\n    y30 = 30\n    y31 = 31\n    y32 = 32\n    y33 = 33\n    y34 = 34\n    y35 = 35\n    y36 = 36\n    y37 = 37\n    y38 = 38\n    y39 = 39\n    y40 = 40\n    y41 = 41\n    y42 = 42\n    y43 = 43\n    y44 = 44\n    y45 = 45\n    y46 = 46\n    y47 = 47\n    y48 = 48\n    y49 = 49\n    y50 = 50\n    y51 = 51\n    y52 = 52\n    y53 = 53\n    y54 = 54\n    y55 = 55\n    y56 = 56\n    y57 = 57\n    y58 = 58\n    y59 = 59\n    y60 = 60\n    y61 = 61\n    y62 = 62\n    y63 = 63\n    y64 = 64\n    y65 = 65\n    y66 = 66\n    y67 = 67\n    y68 = 68\n    y69 = 69\n    y70 = 70\n    y71 = 71\n    y72 = 72\n    y73 = 73\n    y74 = 74\n    y75 = 75\n    y76 = 76\n    y77 = 77\n    y78 = 78\n    y79 = 79\n    y80 = 80\n    y81 = 81\n    y82 = 82\n    y83 = 83\n    y84 = 84\n    y85 = 85\n    y86 = 86\n    y87 = 87\n    y88 = 88\n    y89 = 89\n    y90 = 90\n    y91 = 91\n    y92 = 92\n    y93 = 93\n    y94 = 94\n    y95 = 95\n    y96 = 96\n    y97 = 97\n    y98 = 98\n    y99 = 99\n    y100 = 100\n    y101 = 101\n    y102 = 102\n    y103 = 103\n    y104 = 104\n    y105 = 105\n    y106 = 106\n    y107 = 107\n    y108 = 108\n    y109 = 109\n    y110 = 110\n    y111 = 111\n    y112 = 112\n    y113 = 113\n    y114 = 114\n    y115 = 115\n    y116 = 116\n    y117 = 117\n    y118 = 118\n    y119 = 119\n    y120 = 120\n    y121 = 121\n    y122 = 122\n    y123 = 123\n    y124 = 124\n    y125 = 125\n    y126 = 126\n    y127 = 127\n    y128 = 128\n    y129 = 129\n    y130 = 130\n    y131 = 131\n    y132 = 132\n    y133 = 133\n    y134 = 134\n    y135 = 135\n    y136 = 136\n    y137 = 137\n    y138 = 138\n    y139 = 139\n    y140 = 140\n    y141 = 141\n    y142 = 142\n    y143 = 143\n    y144 = 144\n    y145 = 145\n    y146 = 146\n    y147 = 147\n    y148 = 148\n    y149 = 149\n    y150 = 150\n    y151 = 151\n    y152 = 152\n    y153 = 153\n    y154 = 154\n    y155 = 155\n    y156 = 156\n    y157 = 157\n    y158 = 158\n    y159 = 159\n    y160 = 160\n    y161 = 161\n    y162 = 162\n    y163 = 163\n    y164 = 164\n    y165 = 165\n    y166 = 166\n    y167 = 167\n    y168 = 168\n    y169 = 169\n    y170 = 170\n    y171 = 171\n    y172 = 172\n    y173 = 173\n    y174 = 174\n    y175 = 175\n    y176 = 176\n    y177 = 177\n    y178 = 178\n    y179 = 179\n    y180 = 180\n    y181 = 181\n    y182 = 182\n    y183 = 183\n    y184 = 184\n    y185 = 185\n    y186 = 186\n    y187 = 187\n    y188 = 188\n    y189 = 189\n    y190 = 190\n    y191 = 191\n    y192 = 192\n    y193 = 193\n    y194 = 194\n    y195 = 195\n    y196 = 196\n    y197 = 197\n    y198 = 198\n    y199 = 199",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 300
+ },
+ {
+  "name": "trim_fallback_centre",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "not_in_scope()\n\nfoo()\nbar()",
+   "enclosing_scope": "    x0 = 0\n    x1 = 1\n    x2 = 2\n    x3 = 3\n    x4 = 4\n    x5 = 5\n    x6 = 6\n    x7 = 7\n    x8 = 8\n    x9 = 9\n    x10 = 10\n    x11 = 11\n    x12 = 12\n    x13 = 13\n    x14 = 14\n    x15 = 15\n    x16 = 16\n    x17 = 17\n    x18 = 18\n    x19 = 19\n    x20 = 20\n    x21 = 21\n    x22 = 22\n    x23 = 23\n    x24 = 24\n    x25 = 25\n    x26 = 26\n    x27 = 27\n    x28 = 28\n    x29 = 29\n    x30 = 30\n    x31 = 31\n    x32 = 32\n    x33 = 33\n    x34 = 34\n    x35 = 35\n    x36 = 36\n    x37 = 37\n    x38 = 38\n    x39 = 39\n    x40 = 40\n    x41 = 41\n    x42 = 42\n    x43 = 43\n    x44 = 44\n    x45 = 45\n    x46 = 46\n    x47 = 47\n    x48 = 48\n    x49 = 49\n    x50 = 50\n    x51 = 51\n    x52 = 52\n    x53 = 53\n    x54 = 54\n    x55 = 55\n    x56 = 56\n    x57 = 57\n    x58 = 58\n    x59 = 59\n    x60 = 60\n    x61 = 61\n    x62 = 62\n    x63 = 63\n    x64 = 64\n    x65 = 65\n    x66 = 66\n    x67 = 67\n    x68 = 68\n    x69 = 69\n    x70 = 70\n    x71 = 71\n    x72 = 72\n    x73 = 73\n    x74 = 74\n    x75 = 75\n    x76 = 76\n    x77 = 77\n    x78 = 78\n    x79 = 79\n    x80 = 80\n    x81 = 81\n    x82 = 82\n    x83 = 83\n    x84 = 84\n    x85 = 85\n    x86 = 86\n    x87 = 87\n    x88 = 88\n    x89 = 89\n    x90 = 90\n    x91 = 91\n    x92 = 92\n    x93 = 93\n    x94 = 94\n    x95 = 95\n    x96 = 96\n    x97 = 97\n    x98 = 98\n    x99 = 99\n    x100 = 100\n    x101 = 101\n    x102 = 102\n    x103 = 103\n    x104 = 104\n    x105 = 105\n    x106 = 106\n    x107 = 107\n    x108 = 108\n    x109 = 109\n    x110 = 110\n    x111 = 111\n    x112 = 112\n    x113 = 113\n    x114 = 114\n    x115 = 115\n    x116 = 116\n    x117 = 117\n    x118 = 118\n    x119 = 119\n    x120 = 120\n    x121 = 121\n    x122 = 122\n    x123 = 123\n    x124 = 124\n    x125 = 125\n    x126 = 126\n    x127 = 127\n    x128 = 128\n    x129 = 129\n    x130 = 130\n    x131 = 131\n    x132 = 132\n    x133 = 133\n    x134 = 134\n    x135 = 135\n    x136 = 136\n    x137 = 137\n    x138 = 138\n    x139 = 139\n    x140 = 140\n    x141 = 141\n    x142 = 142\n    x143 = 143\n    x144 = 144\n    x145 = 145\n    x146 = 146\n    x147 = 147\n    x148 = 148\n    x149 = 149\n    x150 = 150\n    x151 = 151\n    x152 = 152\n    x153 = 153\n    x154 = 154\n    x155 = 155\n    x156 = 156\n    x157 = 157\n    x158 = 158\n    x159 = 159\n    x160 = 160\n    x161 = 161\n    x162 = 162\n    x163 = 163\n    x164 = 164\n    x165 = 165\n    x166 = 166\n    x167 = 167\n    x168 = 168\n    x169 = 169\n    x170 = 170\n    x171 = 171\n    x172 = 172\n    x173 = 173\n    x174 = 174\n    x175 = 175\n    x176 = 176\n    x177 = 177\n    x178 = 178\n    x179 = 179\n    x180 = 180\n    x181 = 181\n    x182 = 182\n    x183 = 183\n    x184 = 184\n    x185 = 185\n    x186 = 186\n    x187 = 187\n    x188 = 188\n    x189 = 189\n    x190 = 190\n    x191 = 191\n    x192 = 192\n    x193 = 193\n    x194 = 194\n    x195 = 195\n    x196 = 196\n    x197 = 197\n    x198 = 198\n    x199 = 199\n    with self._lock:\n        self._cache[k] = v\n    y0 = 0\n    y1 = 1\n    y2 = 2\n    y3 = 3\n    y4 = 4\n    y5 = 5\n    y6 = 6\n    y7 = 7\n    y8 = 8\n    y9 = 9\n    y10 = 10\n    y11 = 11\n    y12 = 12\n    y13 = 13\n    y14 = 14\n    y15 = 15\n    y16 = 16\n    y17 = 17\n    y18 = 18\n    y19 = 19\n    y20 = 20\n    y21 = 21\n    y22 = 22\n    y23 = 23\n    y24 = 24\n    y25 = 25\n    y26 = 26\n    y27 = 27\n    y28 = 28\n    y29 = 29\n    y30 = 30\n    y31 = 31\n    y32 = 32\n    y33 = 33\n    y34 = 34\n    y35 = 35\n    y36 = 36\n    y37 = 37\n    y38 = 38\n    y39 = 39\n    y40 = 40\n    y41 = 41\n    y42 = 42\n    y43 = 43\n    y44 = 44\n    y45 = 45\n    y46 = 46\n    y47 = 47\n    y48 = 48\n    y49 = 49\n    y50 = 50\n    y51 = 51\n    y52 = 52\n    y53 = 53\n    y54 = 54\n    y55 = 55\n    y56 = 56\n    y57 = 57\n    y58 = 58\n    y59 = 59\n    y60 = 60\n    y61 = 61\n    y62 = 62\n    y63 = 63\n    y64 = 64\n    y65 = 65\n    y66 = 66\n    y67 = 67\n    y68 = 68\n    y69 = 69\n    y70 = 70\n    y71 = 71\n    y72 = 72\n    y73 = 73\n    y74 = 74\n    y75 = 75\n    y76 = 76\n    y77 = 77\n    y78 = 78\n    y79 = 79\n    y80 = 80\n    y81 = 81\n    y82 = 82\n    y83 = 83\n    y84 = 84\n    y85 = 85\n    y86 = 86\n    y87 = 87\n    y88 = 88\n    y89 = 89\n    y90 = 90\n    y91 = 91\n    y92 = 92\n    y93 = 93\n    y94 = 94\n    y95 = 95\n    y96 = 96\n    y97 = 97\n    y98 = 98\n    y99 = 99\n    y100 = 100\n    y101 = 101\n    y102 = 102\n    y103 = 103\n    y104 = 104\n    y105 = 105\n    y106 = 106\n    y107 = 107\n    y108 = 108\n    y109 = 109\n    y110 = 110\n    y111 = 111\n    y112 = 112\n    y113 = 113\n    y114 = 114\n    y115 = 115\n    y116 = 116\n    y117 = 117\n    y118 = 118\n    y119 = 119\n    y120 = 120\n    y121 = 121\n    y122 = 122\n    y123 = 123\n    y124 = 124\n    y125 = 125\n    y126 = 126\n    y127 = 127\n    y128 = 128\n    y129 = 129\n    y130 = 130\n    y131 = 131\n    y132 = 132\n    y133 = 133\n    y134 = 134\n    y135 = 135\n    y136 = 136\n    y137 = 137\n    y138 = 138\n    y139 = 139\n    y140 = 140\n    y141 = 141\n    y142 = 142\n    y143 = 143\n    y144 = 144\n    y145 = 145\n    y146 = 146\n    y147 = 147\n    y148 = 148\n    y149 = 149\n    y150 = 150\n    y151 = 151\n    y152 = 152\n    y153 = 153\n    y154 = 154\n    y155 = 155\n    y156 = 156\n    y157 = 157\n    y158 = 158\n    y159 = 159\n    y160 = 160\n    y161 = 161\n    y162 = 162\n    y163 = 163\n    y164 = 164\n    y165 = 165\n    y166 = 166\n    y167 = 167\n    y168 = 168\n    y169 = 169\n    y170 = 170\n    y171 = 171\n    y172 = 172\n    y173 = 173\n    y174 = 174\n    y175 = 175\n    y176 = 176\n    y177 = 177\n    y178 = 178\n    y179 = 179\n    y180 = 180\n    y181 = 181\n    y182 = 182\n    y183 = 183\n    y184 = 184\n    y185 = 185\n    y186 = 186\n    y187 = 187\n    y188 = 188\n    y189 = 189\n    y190 = 190\n    y191 = 191\n    y192 = 192\n    y193 = 193\n    y194 = 194\n    y195 = 195\n    y196 = 196\n    y197 = 197\n    y198 = 198\n    y199 = 199",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 250
+ },
+ {
+  "name": "trim_to_nothing",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "    x0 = 0\n    x1 = 1\n    x2 = 2\n    x3 = 3\n    x4 = 4\n    x5 = 5\n    x6 = 6\n    x7 = 7\n    x8 = 8\n    x9 = 9\n    x10 = 10\n    x11 = 11\n    x12 = 12\n    x13 = 13\n    x14 = 14\n    x15 = 15\n    x16 = 16\n    x17 = 17\n    x18 = 18\n    x19 = 19\n    x20 = 20\n    x21 = 21\n    x22 = 22\n    x23 = 23\n    x24 = 24\n    x25 = 25\n    x26 = 26\n    x27 = 27\n    x28 = 28\n    x29 = 29\n    x30 = 30\n    x31 = 31\n    x32 = 32\n    x33 = 33\n    x34 = 34\n    x35 = 35\n    x36 = 36\n    x37 = 37\n    x38 = 38\n    x39 = 39\n    x40 = 40\n    x41 = 41\n    x42 = 42\n    x43 = 43\n    x44 = 44\n    x45 = 45\n    x46 = 46\n    x47 = 47\n    x48 = 48\n    x49 = 49\n    x50 = 50\n    x51 = 51\n    x52 = 52\n    x53 = 53\n    x54 = 54\n    x55 = 55\n    x56 = 56\n    x57 = 57\n    x58 = 58\n    x59 = 59\n    x60 = 60\n    x61 = 61\n    x62 = 62\n    x63 = 63\n    x64 = 64\n    x65 = 65\n    x66 = 66\n    x67 = 67\n    x68 = 68\n    x69 = 69\n    x70 = 70\n    x71 = 71\n    x72 = 72\n    x73 = 73\n    x74 = 74\n    x75 = 75\n    x76 = 76\n    x77 = 77\n    x78 = 78\n    x79 = 79\n    x80 = 80\n    x81 = 81\n    x82 = 82\n    x83 = 83\n    x84 = 84\n    x85 = 85\n    x86 = 86\n    x87 = 87\n    x88 = 88\n    x89 = 89\n    x90 = 90\n    x91 = 91\n    x92 = 92\n    x93 = 93\n    x94 = 94\n    x95 = 95\n    x96 = 96\n    x97 = 97\n    x98 = 98\n    x99 = 99\n    x100 = 100\n    x101 = 101\n    x102 = 102\n    x103 = 103\n    x104 = 104\n    x105 = 105\n    x106 = 106\n    x107 = 107\n    x108 = 108\n    x109 = 109\n    x110 = 110\n    x111 = 111\n    x112 = 112\n    x113 = 113\n    x114 = 114\n    x115 = 115\n    x116 = 116\n    x117 = 117\n    x118 = 118\n    x119 = 119\n    x120 = 120\n    x121 = 121\n    x122 = 122\n    x123 = 123\n    x124 = 124\n    x125 = 125\n    x126 = 126\n    x127 = 127\n    x128 = 128\n    x129 = 129\n    x130 = 130\n    x131 = 131\n    x132 = 132\n    x133 = 133\n    x134 = 134\n    x135 = 135\n    x136 = 136\n    x137 = 137\n    x138 = 138\n    x139 = 139\n    x140 = 140\n    x141 = 141\n    x142 = 142\n    x143 = 143\n    x144 = 144\n    x145 = 145\n    x146 = 146\n    x147 = 147\n    x148 = 148\n    x149 = 149\n    x150 = 150\n    x151 = 151\n    x152 = 152\n    x153 = 153\n    x154 = 154\n    x155 = 155\n    x156 = 156\n    x157 = 157\n    x158 = 158\n    x159 = 159\n    x160 = 160\n    x161 = 161\n    x162 = 162\n    x163 = 163\n    x164 = 164\n    x165 = 165\n    x166 = 166\n    x167 = 167\n    x168 = 168\n    x169 = 169\n    x170 = 170\n    x171 = 171\n    x172 = 172\n    x173 = 173\n    x174 = 174\n    x175 = 175\n    x176 = 176\n    x177 = 177\n    x178 = 178\n    x179 = 179\n    x180 = 180\n    x181 = 181\n    x182 = 182\n    x183 = 183\n    x184 = 184\n    x185 = 185\n    x186 = 186\n    x187 = 187\n    x188 = 188\n    x189 = 189\n    x190 = 190\n    x191 = 191\n    x192 = 192\n    x193 = 193\n    x194 = 194\n    x195 = 195\n    x196 = 196\n    x197 = 197\n    x198 = 198\n    x199 = 199\n    with self._lock:\n        self._cache[k] = v\n    y0 = 0\n    y1 = 1\n    y2 = 2\n    y3 = 3\n    y4 = 4\n    y5 = 5\n    y6 = 6\n    y7 = 7\n    y8 = 8\n    y9 = 9\n    y10 = 10\n    y11 = 11\n    y12 = 12\n    y13 = 13\n    y14 = 14\n    y15 = 15\n    y16 = 16\n    y17 = 17\n    y18 = 18\n    y19 = 19\n    y20 = 20\n    y21 = 21\n    y22 = 22\n    y23 = 23\n    y24 = 24\n    y25 = 25\n    y26 = 26\n    y27 = 27\n    y28 = 28\n    y29 = 29\n    y30 = 30\n    y31 = 31\n    y32 = 32\n    y33 = 33\n    y34 = 34\n    y35 = 35\n    y36 = 36\n    y37 = 37\n    y38 = 38\n    y39 = 39\n    y40 = 40\n    y41 = 41\n    y42 = 42\n    y43 = 43\n    y44 = 44\n    y45 = 45\n    y46 = 46\n    y47 = 47\n    y48 = 48\n    y49 = 49\n    y50 = 50\n    y51 = 51\n    y52 = 52\n    y53 = 53\n    y54 = 54\n    y55 = 55\n    y56 = 56\n    y57 = 57\n    y58 = 58\n    y59 = 59\n    y60 = 60\n    y61 = 61\n    y62 = 62\n    y63 = 63\n    y64 = 64\n    y65 = 65\n    y66 = 66\n    y67 = 67\n    y68 = 68\n    y69 = 69\n    y70 = 70\n    y71 = 71\n    y72 = 72\n    y73 = 73\n    y74 = 74\n    y75 = 75\n    y76 = 76\n    y77 = 77\n    y78 = 78\n    y79 = 79\n    y80 = 80\n    y81 = 81\n    y82 = 82\n    y83 = 83\n    y84 = 84\n    y85 = 85\n    y86 = 86\n    y87 = 87\n    y88 = 88\n    y89 = 89\n    y90 = 90\n    y91 = 91\n    y92 = 92\n    y93 = 93\n    y94 = 94\n    y95 = 95\n    y96 = 96\n    y97 = 97\n    y98 = 98\n    y99 = 99\n    y100 = 100\n    y101 = 101\n    y102 = 102\n    y103 = 103\n    y104 = 104\n    y105 = 105\n    y106 = 106\n    y107 = 107\n    y108 = 108\n    y109 = 109\n    y110 = 110\n    y111 = 111\n    y112 = 112\n    y113 = 113\n    y114 = 114\n    y115 = 115\n    y116 = 116\n    y117 = 117\n    y118 = 118\n    y119 = 119\n    y120 = 120\n    y121 = 121\n    y122 = 122\n    y123 = 123\n    y124 = 124\n    y125 = 125\n    y126 = 126\n    y127 = 127\n    y128 = 128\n    y129 = 129\n    y130 = 130\n    y131 = 131\n    y132 = 132\n    y133 = 133\n    y134 = 134\n    y135 = 135\n    y136 = 136\n    y137 = 137\n    y138 = 138\n    y139 = 139\n    y140 = 140\n    y141 = 141\n    y142 = 142\n    y143 = 143\n    y144 = 144\n    y145 = 145\n    y146 = 146\n    y147 = 147\n    y148 = 148\n    y149 = 149\n    y150 = 150\n    y151 = 151\n    y152 = 152\n    y153 = 153\n    y154 = 154\n    y155 = 155\n    y156 = 156\n    y157 = 157\n    y158 = 158\n    y159 = 159\n    y160 = 160\n    y161 = 161\n    y162 = 162\n    y163 = 163\n    y164 = 164\n    y165 = 165\n    y166 = 166\n    y167 = 167\n    y168 = 168\n    y169 = 169\n    y170 = 170\n    y171 = 171\n    y172 = 172\n    y173 = 173\n    y174 = 174\n    y175 = 175\n    y176 = 176\n    y177 = 177\n    y178 = 178\n    y179 = 179\n    y180 = 180\n    y181 = 181\n    y182 = 182\n    y183 = 183\n    y184 = 184\n    y185 = 185\n    y186 = 186\n    y187 = 187\n    y188 = 188\n    y189 = 189\n    y190 = 190\n    y191 = 191\n    y192 = 192\n    y193 = 193\n    y194 = 194\n    y195 = 195\n    y196 = 196\n    y197 = 197\n    y198 = 198\n    y199 = 199",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 40
+ },
+ {
+  "name": "line_boundaries",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "\u001f line30 = 30",
+   "enclosing_scope": "    line0 = 0\n    line1 = 1\n    line2 = 2\n    line3 = 3\n    line4 = 4\n    line5 = 5\n    line6 = 6\n    line7 = 7\n    line8 = 8\n    line9 = 9\n    line10 = 10\r\n    line11 = 11\n    line12 = 12\n    line13 = 13\n    line14 = 14\n    line15 = 15\n    line16 = 16\n    line17 = 17\n    line18 = 18\n    line19 = 19\n    line20 = 20\u2028    line21 = 21\n    line22 = 22\n    line23 = 23\n    line24 = 24\n    line25 = 25\n    line26 = 26\n    line27 = 27\n    line28 = 28\n    line29 = 29\n    line30 = 30\f    line31 = 31\n    line32 = 32\n    line33 = 33\n    line34 = 34\n    line35 = 35\u001e    line36 = 36\n    line37 = 37\n    line38 = 38\n    line39 = 39\n    line40 = 40\u0085    line41 = 41\n    line42 = 42\n    line43 = 43\n    line44 = 44\n    line45 = 45\r    line46 = 46\n    line47 = 47\n    line48 = 48\n    line49 = 49\n    line50 = 50\n    line51 = 51\n    line52 = 52\n    line53 = 53\n    line54 = 54\n    line55 = 55\n    line56 = 56\n    line57 = 57\n    line58 = 58\n    line59 = 59",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 200
+ },
+ {
+  "name": "multibyte",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# \u65e5\u672c\u8a9e\u306e\u30b3\u30e1\u30f3\u30c8",
+   "annotated_code": "    \u00e940 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c840'",
+   "enclosing_scope": "    \u00e90 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c80'\n    \u00e91 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c81'\n    \u00e92 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c82'\n    \u00e93 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c83'\n    \u00e94 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c84'\n    \u00e95 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c85'\n    \u00e96 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c86'\n    \u00e97 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c87'\n    \u00e98 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c88'\n    \u00e99 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c89'\n    \u00e910 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c810'\n    \u00e911 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c811'\n    \u00e912 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c812'\n    \u00e913 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c813'\n    \u00e914 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c814'\n    \u00e915 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c815'\n    \u00e916 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c816'\n    \u00e917 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c817'\n    \u00e918 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c818'\n    \u00e919 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c819'\n    \u00e920 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c820'\n    \u00e921 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c821'\n    \u00e922 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c822'\n    \u00e923 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c823'\n    \u00e924 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c824'\n    \u00e925 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c825'\n    \u00e926 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c826'\n    \u00e927 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c827'\n    \u00e928 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c828'\n    \u00e929 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c829'\n    \u00e930 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c830'\n    \u00e931 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c831'\n    \u00e932 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c832'\n    \u00e933 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c833'\n    \u00e934 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c834'\n    \u00e935 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c835'\n    \u00e936 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c836'\n    \u00e937 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c837'\n    \u00e938 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c838'\n    \u00e939 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c839'\n    \u00e940 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c840'\n    \u00e941 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c841'\n    \u00e942 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c842'\n    \u00e943 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c843'\n    \u00e944 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c844'\n    \u00e945 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c845'\n    \u00e946 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c846'\n    \u00e947 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c847'\n    \u00e948 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c848'\n    \u00e949 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c849'\n    \u00e950 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c850'\n    \u00e951 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c851'\n    \u00e952 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c852'\n    \u00e953 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c853'\n    \u00e954 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c854'\n    \u00e955 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c855'\n    \u00e956 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c856'\n    \u00e957 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c857'\n    \u00e958 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c858'\n    \u00e959 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c859'\n    \u00e960 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c860'\n    \u00e961 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c861'\n    \u00e962 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c862'\n    \u00e963 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c863'\n    \u00e964 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c864'\n    \u00e965 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c865'\n    \u00e966 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c866'\n    \u00e967 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c867'\n    \u00e968 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c868'\n    \u00e969 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c869'\n    \u00e970 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c870'\n    \u00e971 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c871'\n    \u00e972 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c872'\n    \u00e973 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c873'\n    \u00e974 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c874'\n    \u00e975 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c875'\n    \u00e976 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c876'\n    \u00e977 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c877'\n    \u00e978 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c878'\n    \u00e979 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c879'",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 503
+ },
+ {
+  "name": "multibyte_trim",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# \u65e5\u672c\u8a9e\u306e\u30b3\u30e1\u30f3\u30c8",
+   "annotated_code": "    \u00e940 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c840'",
+   "enclosing_scope": "    \u00e90 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c80'\n    \u00e91 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c81'\n    \u00e92 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c82'\n    \u00e93 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c83'\n    \u00e94 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c84'\n    \u00e95 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c85'\n    \u00e96 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c86'\n    \u00e97 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c87'\n    \u00e98 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c88'\n    \u00e99 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c89'\n    \u00e910 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c810'\n    \u00e911 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c811'\n    \u00e912 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c812'\n    \u00e913 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c813'\n    \u00e914 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c814'\n    \u00e915 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c815'\n    \u00e916 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c816'\n    \u00e917 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c817'\n    \u00e918 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c818'\n    \u00e919 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c819'\n    \u00e920 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c820'\n    \u00e921 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c821'\n    \u00e922 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c822'\n    \u00e923 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c823'\n    \u00e924 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c824'\n    \u00e925 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c825'\n    \u00e926 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c826'\n    \u00e927 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c827'\n    \u00e928 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c828'\n    \u00e929 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c829'\n    \u00e930 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c830'\n    \u00e931 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c831'\n    \u00e932 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c832'\n    \u00e933 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c833'\n    \u00e934 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c834'\n    \u00e935 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c835'\n    \u00e936 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c836'\n    \u00e937 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c837'\n    \u00e938 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c838'\n    \u00e939 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c839'\n    \u00e940 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c840'\n    \u00e941 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c841'\n    \u00e942 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c842'\n    \u00e943 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c843'\n    \u00e944 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c844'\n    \u00e945 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c845'\n    \u00e946 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c846'\n    \u00e947 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c847'\n    \u00e948 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c848'\n    \u00e949 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c849'\n    \u00e950 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c850'\n    \u00e951 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c851'\n    \u00e952 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c852'\n    \u00e953 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c853'\n    \u00e954 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c854'\n    \u00e955 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c855'\n    \u00e956 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c856'\n    \u00e957 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c857'\n    \u00e958 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c858'\n    \u00e959 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c859'\n    \u00e960 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c860'\n    \u00e961 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c861'\n    \u00e962 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c862'\n    \u00e963 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c863'\n    \u00e964 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c864'\n    \u00e965 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c865'\n    \u00e966 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c866'\n    \u00e967 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c867'\n    \u00e968 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c868'\n    \u00e969 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c869'\n    \u00e970 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c870'\n    \u00e971 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c871'\n    \u00e972 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c872'\n    \u00e973 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c873'\n    \u00e974 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c874'\n    \u00e975 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c875'\n    \u00e976 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c876'\n    \u00e977 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c877'\n    \u00e978 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c878'\n    \u00e979 = '\u65e5\u672c\u8a9e\u306e\u30c6\u30ad\u30b9\u30c879'",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 453
+ },
+ {
+  "name": "api_doc",
+  "row": {
+   "language": "python",
+   "comment_kind": "api_doc",
+   "placement": "function_head",
+   "comment": "\"\"\"Set k to v.\"\"\"",
+   "annotated_code": "def set(self, k, v):\n    self._cache[k] = v",
+   "enclosing_scope": "class Cache:\n    def set(self, k, v):\n        # hold the lock: the refresher thread writes _cache\n        with self._lock:\n            self._cache[k] = v",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 3000
+ },
+ {
+  "name": "todo",
+  "row": {
+   "language": "python",
+   "comment_kind": "todo",
+   "placement": "before_statement",
+   "comment": "# TODO(jeff): drop this after #42",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "class Cache:\n    def set(self, k, v):\n        # hold the lock: the refresher thread writes _cache\n        with self._lock:\n            self._cache[k] = v",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   }
+  },
+  "max_tokens": 3000
+ },
+ {
+  "name": "change_all",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "class Cache:\n    def set(self, k, v):\n        # hold the lock: the refresher thread writes _cache\n        with self._lock:\n            self._cache[k] = v",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   },
+   "change": {
+    "comment_new": false,
+    "comment_modified": false,
+    "scope_changed": true,
+    "annotated_code_before": "with self._lock:\n    self._cache[k] = v + 1"
+   }
+  },
+  "max_tokens": 3000
+ },
+ {
+  "name": "change_scope_only",
+  "row": {
+   "language": "python",
+   "comment_kind": "inline",
+   "placement": "before_statement",
+   "comment": "# hold the lock: the refresher thread writes _cache",
+   "annotated_code": "with self._lock:\n    self._cache[k] = v",
+   "enclosing_scope": "class Cache:\n    def set(self, k, v):\n        # hold the lock: the refresher thread writes _cache\n        with self._lock:\n            self._cache[k] = v",
+   "symbol": {
+    "name": "Cache.set",
+    "public": true,
+    "is_test": false
+   },
+   "change": {
+    "scope_changed": true
+   }
+  },
+  "max_tokens": 3000
+ }
+]

@@ -1,0 +1,17 @@
+{
+  "version": "verify-v1",
+  "questions": {
+    "preserves": {
+      "type": "noul",
+      "instructions": "Does `candidate` keep every hazard, contract or precondition stated in `original`?"
+    },
+    "adds": {
+      "type": "noul",
+      "instructions": "Does `candidate` assert anything that is in neither `original` nor the code?"
+    },
+    "g1_candidate": {
+      "type": "noul",
+      "instructions": "Does `candidate` contradict `annotated_code` or `enclosing_scope`?"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+original:
+# hold the lock: the refresher
+# thread writes _cache
+
+candidate:
+# hold the lock
+
+annotated_code:
+with self._lock:
+    self._cache[k] = v
+
+enclosing_scope:
+def set(self, k, v):
+    with self._lock:
+        self._cache[k] = v

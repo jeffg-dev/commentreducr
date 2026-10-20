@@ -1,0 +1,17 @@
+language: python  comment_kind: todo  placement: before_statement
+
+comment:
+# TODO(jeff): drop this after #42
+
+annotated_code:
+with self._lock:
+    self._cache[k] = v
+
+symbol: Cache.set  public: True  is_test: False
+
+enclosing_scope:
+class Cache:
+    def set(self, k, v):
+        # hold the lock: the refresher thread writes _cache
+        with self._lock:
+            self._cache[k] = v

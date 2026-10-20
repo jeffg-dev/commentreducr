@@ -1,0 +1,39 @@
+{
+ "id": "syn-08",
+ "judge": "systemone:synthetic",
+ "answers": {
+  "g1_contradicts": {
+   "true": 0.0,
+   "false": 1.0
+  },
+  "c2_info_gain": {
+   "0": 0,
+   "1": 0,
+   "2": 0,
+   "3": 1.0
+  },
+  "c5_contract": {
+   "0": 0,
+   "1": 0,
+   "2": 0,
+   "3": 1.0
+  },
+  "c8_durability": {
+   "0": 0,
+   "1": 0,
+   "2": 0,
+   "3": 1.0
+  },
+  "c9_replaceable": {
+   "fully": 0.0,
+   "partly": 0.0,
+   "no": 1.0
+  }
+ },
+ "verdict": null,
+ "rewrite": null,
+ "latency_ms": null,
+ "input_tokens": 500,
+ "raw": null,
+ "rewrite_scores": null
+}

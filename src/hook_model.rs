@@ -67,7 +67,7 @@ pub fn install_model() -> Result<PathBuf> {
         verify(&std::fs::read(&path)?)?;
         return Ok(path);
     }
-    println!("Downloading MiniLM-L12 (34 MB) to {}", path.display());
+    eprintln!("Downloading MiniLM-L12 (34 MB) to {}", path.display());
     let response = minreq::get(MODEL_URL)
         .with_timeout(60)
         .send()
@@ -135,6 +135,11 @@ impl Classifier {
 
     pub fn threshold(&self) -> f64 {
         self.config.threshold
+    }
+
+    /// The shipped threshold, without loading the model.
+    pub fn default_threshold() -> Result<f64> {
+        Ok(serde_json::from_str::<ModelConfig>(CONFIG)?.threshold)
     }
 
     pub fn probability(&mut self, kind: &str, text: &str, context: &str) -> Result<f64> {

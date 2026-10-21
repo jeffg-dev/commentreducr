@@ -63,7 +63,11 @@ fn settings_key(cfg: &Config, llm_key: &str, changes: Option<&Changeset>) -> Str
     let settings = fingerprint(&[
         llm_key,
         &format!("{:?}", cfg.target),
-        &format!("{:?}", cfg.language),
+        // One language keys exactly as before the flag became repeatable, so saved progress holds.
+        &match cfg.language.as_slice() {
+            [one] => format!("{one:?}"),
+            many => format!("{many:?}"),
+        },
         &format!("{:?}{:?}", cfg.keep_decorators, cfg.keep_bases),
         include_str!("model/minilm-l12-classifier.json"),
         crate::hook_model::MODEL_SHA256,
@@ -806,7 +810,7 @@ pub(crate) mod tests {
     pub(crate) fn cfg(judge: JudgeKind) -> Config {
         Config {
             target: crate::Target::All,
-            language: crate::Languages::All,
+            language: vec![crate::Languages::All],
             mode: crate::Mode::Reduce,
             max_summary_words: 20,
             endpoint: "http://e/v1".into(),
@@ -960,8 +964,15 @@ pub(crate) mod tests {
     }
 
     fn changed_run(repo: &Repo, spec: &str, cfg: &Config, report_only: bool) -> Stats {
-        let cs = changeset::collect(&repo.0, Some(spec), None, None, crate::Languages::All, &[])
-            .unwrap();
+        let cs = changeset::collect(
+            &repo.0,
+            Some(spec),
+            None,
+            None,
+            &[crate::Languages::All],
+            &[],
+        )
+        .unwrap();
         let mode = RunMode {
             changes: Some(&cs),
             report_only,
@@ -1183,8 +1194,15 @@ pub(crate) mod tests {
         let (repo, spec, head) = fixture();
         let (url, _) = mock(systemone(0.0));
         let cfg = with_endpoint(JudgeKind::SystemOne, &url);
-        let cs = changeset::collect(&repo.0, Some(&spec), None, None, crate::Languages::All, &[])
-            .unwrap();
+        let cs = changeset::collect(
+            &repo.0,
+            Some(&spec),
+            None,
+            None,
+            &[crate::Languages::All],
+            &[],
+        )
+        .unwrap();
         let file = repo.0.join("a.js").canonicalize().unwrap();
         let settings = settings_key(&cfg, &llm_key(&cfg), Some(&cs));
         Database::open(&repo.0, None)

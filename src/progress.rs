@@ -113,6 +113,8 @@ impl<'a> Progress<'a> {
         );
         let elapsed = self.started.elapsed();
         if done > 0 && done < self.total {
+            let per_min = done as f64 * 60.0 / elapsed.as_secs_f64().max(0.001);
+            s.push_str(&format!(", {per_min:.1} blocks/min"));
             let eta = elapsed / done as u32 * (self.total - done) as u32;
             s.push_str(&format!(", ~{} left", fmt_duration(eta)));
         }
@@ -174,7 +176,8 @@ mod tests {
         assert_eq!(p.line(0, 0), "  0%  0/200 blocks, 3/10 files");
         assert!(
             p.line(50, 25)
-                .starts_with(" 25%  50/200 blocks, 3/10 files, ~")
+                .starts_with(" 25%  50/200 blocks, 3/10 files, ")
+                && p.line(50, 25).contains(" blocks/min, ~")
         );
         assert_eq!(p.line(200, 100), "100%  200/200 blocks, 3/10 files");
     }

@@ -8,11 +8,11 @@ comments (Python, JS/TS, YAML, Rust) and Python docstrings (module, class, funct
 
 ## CLI and selection
 
-`reduce [path] --scope comments|docstrings|all --language python|typescript|rust|all --workers N`
+`reduce [path] --scope comments|docstrings|all --language python|typescript|rust|yaml|all --workers N`
 classifies every non-structural Python item and sends flagged or oversized items to the LLM.
 Other supported languages bypass the Python-only classifier and go directly to the LLM. `delete` uses the same
 scope/language selection and removes all safely editable non-structural items without inference.
-TypeScript includes TSX; all also includes JavaScript and YAML. There are no line-count, density,
+TypeScript includes JavaScript and TSX. There are no line-count, density,
 trailing-comment, or code-like gates. Every build includes local classifier inference and SQLite.
 
 `install-git-hook` installs/upgrades the warning-only pre-push wrapper. `check [--warn]` checks

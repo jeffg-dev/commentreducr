@@ -833,11 +833,11 @@ fn language_and_scope_filters_combine_and_flags_override_config() {
         "typescript",
     ]))
     .success()
-    .stderr_contains("2 files scanned, 2 changed");
+    .stderr_contains("3 files scanned, 3 changed");
     assert_eq!(read(dir.path(), "item.py"), python);
     assert_eq!(read(dir.path(), "item.ts"), "const a = 1;\n");
     assert_eq!(read(dir.path(), "item.tsx"), "const a = <div/>;\n");
-    assert!(read(dir.path(), "item.js").starts_with("// narration"));
+    assert_eq!(read(dir.path(), "item.js"), "const a = 1;\n");
     let config = dir.path().join("config.toml");
     std::fs::write(&config, "scope = \"docstrings\"\nlanguage = \"python\"\n").unwrap();
     run(commentreducr()

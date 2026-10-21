@@ -1,13 +1,12 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use commentreducr::{Config, Finding, JudgeKind, Languages, Mode, Target, findings, run};
 use std::path::{Path, PathBuf};
 
 /// Shipped defaults use the same configuration parser as the user's file.
 const DEFAULT_CONFIG_TOML: &str = include_str!("default_config.toml");
 
-const AFTER_HELP: &str =
-    "Advanced options: --help. Settings file: ~/.config/commentreducr/config.toml";
+const AFTER_HELP: &str = "All options: --help --verbose";
 const AFTER_LONG_HELP: &str = "endpoint, model, docstrings_model, api_key, workers, scope, language, database, \
                                max_words, ignore, keep_decorators, keep_bases, judge, judge_model, \
                                judge_endpoint, escalation_model, generator_model and judge_thresholds \
@@ -25,10 +24,10 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Command {
     /// Screen all non-structural items, then reduce or delete flagged items with the LLM
-    #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
+    #[command(after_help = AFTER_HELP)]
     Reduce(Opts),
     /// Delete all non-structural items without a classifier or LLM
-    #[command(after_help = AFTER_HELP, after_long_help = AFTER_LONG_HELP)]
+    #[command(after_help = AFTER_HELP)]
     Delete(Opts),
     /// Install a warning-only pre-push hook and prepare the local classifier
     InstallGitHook,
@@ -278,8 +277,8 @@ fn legacy_check(
     Ok((findings, lines, summary, failed))
 }
 
-/// Field order is help order: common flags, then the "Inference" heading, then "Advanced" (long
-/// help only). Numeric flags are `Option` so the config file can supply them when absent.
+/// Field order is help order: common flags, then the "Inference" and "Advanced" headings, which
+/// only `--help --verbose` shows (see `cli_command`). Numeric flags are `Option` so the config file can supply them when absent.
 #[derive(clap::Args, Debug, Default)]
 struct Opts {
     /// Directory or file to process [default: .]
@@ -297,7 +296,7 @@ struct Opts {
     #[arg(long, value_name = "BASE..HEAD", conflicts_with_all = ["eval", "diagnose", "dump_items"])]
     changed: Option<String>,
 
-    /// With delete only: report changes without writing
+    /// Report changes without writing
     #[arg(long)]
     dry_run: bool,
 
@@ -306,67 +305,72 @@ struct Opts {
     #[arg(long, conflicts_with_all = ["eval", "diagnose", "dump_items"])]
     ai: bool,
 
-    /// SQLite state file [default: Git metadata directory/commentreducr/state.sqlite]
-    #[arg(long, value_name = "FILE")]
-    database: Option<PathBuf>,
-
-    /// Worker threads (and max in-flight LLM requests) [default: 8]
-    #[arg(short = 'n', long, alias = "concurrency", value_name = "N")]
-    workers: Option<usize>,
-
     /// Print every changed block, not just per-file summaries.
     #[arg(short, long)]
     verbose: bool,
 
-    /// Config file [default: ~/.config/commentreducr/config.toml]
-    #[arg(
-        long,
-        value_name = "FILE",
-        default_value_os_t = default_config_path(),
-        hide_default_value = true
-    )]
-    config: PathBuf,
-
     /// OpenAI-compatible base URL [default: http://localhost:8000/v1]
-    #[arg(long, help_heading = "Inference")]
+    #[arg(long, help_heading = "Inference", hide = true)]
     endpoint: Option<String>,
 
     /// Model name
     #[arg(
         long,
         help_heading = "Inference",
+        hide = true,
         long_help = "Model name [default: gemma-4-e2b-it-4bit for comments, \
                       gemma-4-26b-a4b-it-4bit for docstrings]"
     )]
     model: Option<String>,
 
     /// API key, if the endpoint needs one
-    #[arg(long, help_heading = "Inference")]
+    #[arg(long, help_heading = "Inference", hide = true)]
     api_key: Option<String>,
 
     /// Verdict path [default: legacy]
-    #[arg(long, value_enum, help_heading = "Inference")]
+    #[arg(long, value_enum, help_heading = "Inference", hide = true)]
     judge: Option<JudgeKind>,
 
     /// Judge model name [default: clef-flash-4bit]
-    #[arg(long, help_heading = "Inference")]
+    #[arg(long, help_heading = "Inference", hide = true)]
     judge_model: Option<String>,
 
     /// Full judge URL [default: derived from the endpoint]
-    #[arg(long, help_heading = "Inference")]
+    #[arg(long, help_heading = "Inference", hide = true)]
     judge_endpoint: Option<String>,
 
     /// JSON file of policy thresholds merged over the shipped ones (e.g. for a fine-tuned judge)
-    #[arg(long, value_name = "FILE", help_heading = "Inference")]
+    #[arg(long, value_name = "FILE", help_heading = "Inference", hide = true)]
     judge_thresholds: Option<PathBuf>,
 
-    /// (comments only) Target max words in a summary [default: 20]
+    /// SQLite state file [default: Git metadata directory/commentreducr/state.sqlite]
+    #[arg(long, value_name = "FILE", help_heading = "Advanced", hide = true)]
+    database: Option<PathBuf>,
+
+    /// Worker threads (and max in-flight LLM requests) [default: 8]
     #[arg(
+        short = 'n',
         long,
+        alias = "concurrency",
         value_name = "N",
         help_heading = "Advanced",
-        hide_short_help = true
+        hide = true
     )]
+    workers: Option<usize>,
+
+    /// Config file [default: ~/.config/commentreducr/config.toml]
+    #[arg(
+        long,
+        value_name = "FILE",
+        default_value_os_t = default_config_path(),
+        hide_default_value = true,
+        help_heading = "Advanced",
+        hide = true
+    )]
+    config: PathBuf,
+
+    /// (comments only) Target max words in a summary [default: 20]
+    #[arg(long, value_name = "N", help_heading = "Advanced", hide = true)]
     max_words: Option<usize>,
 
     /// Parse only, no LLM, no writes: report files that fail to parse
@@ -374,7 +378,7 @@ struct Opts {
         long,
         conflicts_with = "eval",
         help_heading = "Advanced",
-        hide_short_help = true,
+        hide = true,
         long_help = "Parse only, no LLM, no writes: print a redacted report of every file that \
                       fails to parse (node kinds and line shapes, no paths or code) for pasting \
                       into a bug report"
@@ -382,12 +386,7 @@ struct Opts {
     diagnose: bool,
 
     /// Score the LLM prompt against a labeled JSONL dataset instead of processing files
-    #[arg(
-        long,
-        value_name = "JSONL",
-        help_heading = "Advanced",
-        hide_short_help = true
-    )]
+    #[arg(long, value_name = "JSONL", help_heading = "Advanced", hide = true)]
     eval: Option<PathBuf>,
 
     /// (v2 datasets) Write one run file per row into DIR, for tools/bakeoff/score.py
@@ -396,7 +395,7 @@ struct Opts {
         value_name = "DIR",
         requires = "eval",
         help_heading = "Advanced",
-        hide_short_help = true
+        hide = true
     )]
     eval_runs: Option<PathBuf>,
 
@@ -406,7 +405,7 @@ struct Opts {
         value_name = "FILE",
         conflicts_with_all = ["eval", "diagnose"],
         help_heading = "Advanced",
-        hide_short_help = true
+        hide = true
     )]
     dump_items: Option<PathBuf>,
 }
@@ -803,8 +802,54 @@ fn build_config(opts: &Opts, mode: Mode) -> Result<Config> {
     Ok(cfg)
 }
 
+/// `--help` lists the common flags; `--help --verbose` adds the "Inference" and "Advanced" ones.
+/// Each subcommand also hides the flags it rejects.
+fn cli_command() -> clap::Command {
+    let args: Vec<String> = std::env::args().collect();
+    let has = |names: [&str; 2]| args.iter().any(|a| names.contains(&a.as_str()));
+    let all = has(["-h", "--help"]) && has(["-v", "--verbose"]);
+    let mut cmd = Cli::command();
+    for name in ["reduce", "delete"] {
+        cmd = cmd.mut_subcommand(name, |mut sub| {
+            if all {
+                let ids: Vec<_> = sub
+                    .get_arguments()
+                    .filter(|a| a.get_help_heading().is_some())
+                    .map(|a| a.get_id().clone())
+                    .collect();
+                for id in ids {
+                    sub = sub.mut_arg(id, |a| a.hide(false));
+                }
+                sub = sub.after_help(AFTER_LONG_HELP);
+            }
+            let rejected: &[&str] = if name == "reduce" {
+                &["dry_run"]
+            } else {
+                &[
+                    "ai",
+                    "endpoint",
+                    "model",
+                    "api_key",
+                    "judge",
+                    "judge_model",
+                    "judge_endpoint",
+                    "judge_thresholds",
+                    "max_words",
+                    "eval",
+                    "eval_runs",
+                ]
+            };
+            for id in rejected {
+                sub = sub.mut_arg(*id, |a| a.hide(true));
+            }
+            sub
+        });
+    }
+    cmd
+}
+
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::from_arg_matches(&cli_command().get_matches()).unwrap_or_else(|e| e.exit());
     std::panic::set_hook(Box::new(|_| {}));
     let (mode, opts) = match &cli.command {
         Command::Reduce(o) => (Mode::Reduce, o),

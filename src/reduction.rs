@@ -63,7 +63,11 @@ fn settings_key(cfg: &Config, llm_key: &str, changes: Option<&Changeset>) -> Str
     let settings = fingerprint(&[
         llm_key,
         &format!("{:?}", cfg.target),
-        &format!("{:?}", cfg.language),
+        // One language keys exactly as before the flag became repeatable, so saved progress holds.
+        &match cfg.language.as_slice() {
+            [one] => format!("{one:?}"),
+            many => format!("{many:?}"),
+        },
         &format!("{:?}{:?}", cfg.keep_decorators, cfg.keep_bases),
         include_str!("model/minilm-l12-classifier.json"),
         crate::hook_model::MODEL_SHA256,

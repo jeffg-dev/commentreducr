@@ -626,7 +626,7 @@ pub(crate) fn collect(
     range: Option<&str>,
     input: Option<&str>,
     remote: Option<&str>,
-    languages: Languages,
+    languages: &[Languages],
     ignore: &[String],
 ) -> Result<Changeset> {
     let root =
@@ -649,7 +649,9 @@ pub(crate) fn collect(
         let paths = changed_paths(repo, base, tip)?;
         let ignored = ignored_paths(repo, &paths, ignore)?;
         for path in paths.into_iter().filter(|p| !ignored.contains(&p.new)) {
-            if !Language::from_path(&path.new).is_some_and(|l| languages.matches(l)) {
+            if !Language::from_path(&path.new)
+                .is_some_and(|l| languages.iter().any(|x| x.matches(l)))
+            {
                 other_languages += 1;
                 continue;
             }
@@ -789,7 +791,7 @@ pub(crate) mod tests {
         repo.write("d.txt", "changed\n");
         let tip = repo.commit();
         let spec = format!("{base}..{tip}");
-        let all = collect(&repo.0, Some(&spec), None, None, Languages::All, &[]).unwrap();
+        let all = collect(&repo.0, Some(&spec), None, None, &[Languages::All], &[]).unwrap();
         assert_eq!(
             all.ranges,
             [Range {
@@ -812,7 +814,7 @@ pub(crate) mod tests {
         );
         assert_eq!(all.files[0].base_source.as_deref(), Some("x = 1\n"));
         assert!(all.files[0].head_source.ends_with("# new\n"));
-        let py = collect(&repo.0, Some(&spec), None, None, Languages::Python, &[]).unwrap();
+        let py = collect(&repo.0, Some(&spec), None, None, &[Languages::Python], &[]).unwrap();
         assert_eq!(py.files.len(), 1);
         assert!(parse_range(&repo.0, "nonsense").is_err());
     }
@@ -854,7 +856,7 @@ pub(crate) mod tests {
         repo.write("b.py", "x = 1\n# new\n");
         let tip = repo.commit();
         let spec = format!("{base}..{tip}");
-        let cs = collect(&repo.0, Some(&spec), None, None, Languages::All, &[]).unwrap();
+        let cs = collect(&repo.0, Some(&spec), None, None, &[Languages::All], &[]).unwrap();
         let got: Vec<_> = cs.files.iter().map(|f| f.path.to_str().unwrap()).collect();
         assert_eq!(got, ["b.py"]);
         assert_eq!(cs.not_utf8, 1);
@@ -871,7 +873,7 @@ pub(crate) mod tests {
         repo.write("ui/ok.rs", "// new\nfn main() {}\n");
         let tip = repo.commit();
         let spec = format!("{base}..{tip}");
-        let cs = collect(&repo.0, Some(&spec), None, None, Languages::All, &[]).unwrap();
+        let cs = collect(&repo.0, Some(&spec), None, None, &[Languages::All], &[]).unwrap();
         let got: Vec<_> = cs.files.iter().map(|f| f.path.to_str().unwrap()).collect();
         assert_eq!(got, ["ui/ok.rs"]);
     }
@@ -890,7 +892,7 @@ pub(crate) mod tests {
         repo.write("b.ts", &read("after.ts"));
         let head = repo.commit();
         let spec = format!("{base}..{head}");
-        let cs = collect(&repo.0, Some(&spec), None, None, Languages::All, &[]).unwrap();
+        let cs = collect(&repo.0, Some(&spec), None, None, &[Languages::All], &[]).unwrap();
         let cfg = crate::reduction::tests::cfg(crate::JudgeKind::SystemOne);
         let mut got = serde_json::Map::new();
         for f in &cs.files {
@@ -953,7 +955,7 @@ pub(crate) mod tests {
             Some(&format!("{first}..{second}")),
             None,
             None,
-            Languages::All,
+            &[Languages::All],
             &[],
         )
         .unwrap();
@@ -982,7 +984,7 @@ pub(crate) mod tests {
         repo.write("a.py", &read("after.py"));
         let head = repo.commit();
         let spec = format!("{base}..{head}");
-        let cs = collect(&repo.0, Some(&spec), None, None, Languages::All, &[]).unwrap();
+        let cs = collect(&repo.0, Some(&spec), None, None, &[Languages::All], &[]).unwrap();
         let cfg = crate::reduction::tests::cfg(crate::JudgeKind::SystemOne);
         let f = &cs.files[0];
         let b = Base::new(
@@ -1024,7 +1026,7 @@ pub(crate) mod tests {
         repo.write("a.py", &src.replace("= 3", "= 5"));
         let head = repo.commit();
         let spec = format!("{base}..{head}");
-        let cs = collect(&repo.0, Some(&spec), None, None, Languages::All, &[]).unwrap();
+        let cs = collect(&repo.0, Some(&spec), None, None, &[Languages::All], &[]).unwrap();
         let cfg = crate::reduction::tests::cfg(crate::JudgeKind::SystemOne);
         let f = &cs.files[0];
         let b = Base::new(

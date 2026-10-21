@@ -278,7 +278,7 @@ fn legacy_check(
     Ok((findings, lines, summary, failed))
 }
 
-/// Field order is help order: common flags, then the "LLM" heading, then "Advanced" (long
+/// Field order is help order: common flags, then the "Inference" heading, then "Advanced" (long
 /// help only). Numeric flags are `Option` so the config file can supply them when absent.
 #[derive(clap::Args, Debug, Default)]
 struct Opts {
@@ -289,9 +289,9 @@ struct Opts {
     #[arg(long, value_enum)]
     scope: Option<Target>,
 
-    /// Languages to process [default: all]; typescript includes TSX
-    #[arg(long, value_enum)]
-    language: Option<Languages>,
+    /// Languages to process, repeatable [default: all]; typescript includes JavaScript and TSX
+    #[arg(short, long, value_enum)]
+    language: Vec<Languages>,
 
     /// Judge only comments added or changed in this commit range, and report comments whose code changed
     #[arg(long, value_name = "BASE..HEAD", conflicts_with_all = ["eval", "diagnose", "dump_items"])]
@@ -301,7 +301,8 @@ struct Opts {
     #[arg(long)]
     dry_run: bool,
 
-    /// For AI agents: apply only certain deletes; print everything else as JSONL advice on stdout
+    /// For AI agents: delete only the items judged safe by the decision engine; print advice for
+    /// the rest as JSONL on stdout
     #[arg(long, conflicts_with_all = ["eval", "diagnose", "dump_items"])]
     ai: bool,
 
@@ -327,36 +328,36 @@ struct Opts {
     config: PathBuf,
 
     /// OpenAI-compatible base URL [default: http://localhost:8000/v1]
-    #[arg(long, help_heading = "LLM")]
+    #[arg(long, help_heading = "Inference")]
     endpoint: Option<String>,
 
     /// Model name
     #[arg(
         long,
-        help_heading = "LLM",
+        help_heading = "Inference",
         long_help = "Model name [default: gemma-4-e2b-it-4bit for comments, \
                       gemma-4-26b-a4b-it-4bit for docstrings]"
     )]
     model: Option<String>,
 
     /// API key, if the endpoint needs one
-    #[arg(long, help_heading = "LLM")]
+    #[arg(long, help_heading = "Inference")]
     api_key: Option<String>,
 
     /// Verdict path [default: legacy]
-    #[arg(long, value_enum, help_heading = "LLM")]
+    #[arg(long, value_enum, help_heading = "Inference")]
     judge: Option<JudgeKind>,
 
     /// Judge model name [default: clef-flash-4bit]
-    #[arg(long, help_heading = "LLM")]
+    #[arg(long, help_heading = "Inference")]
     judge_model: Option<String>,
 
     /// Full judge URL [default: derived from the endpoint]
-    #[arg(long, help_heading = "LLM")]
+    #[arg(long, help_heading = "Inference")]
     judge_endpoint: Option<String>,
 
     /// JSON file of policy thresholds merged over the shipped ones (e.g. for a fine-tuned judge)
-    #[arg(long, value_name = "FILE", help_heading = "LLM")]
+    #[arg(long, value_name = "FILE", help_heading = "Inference")]
     judge_thresholds: Option<PathBuf>,
 
     /// (comments only) Target max words in a summary [default: 20]
@@ -615,6 +616,7 @@ fn assign_config_value(
                 "python" => Languages::Python,
                 "typescript" => Languages::TypeScript,
                 "rust" => Languages::Rust,
+                "yaml" => Languages::Yaml,
                 "all" => Languages::All,
                 _ => anyhow::bail!("line {lineno}: invalid language"),
             });
@@ -748,7 +750,11 @@ fn build_config(opts: &Opts, mode: Mode) -> Result<Config> {
         .unwrap_or(defaults.docstrings_model);
     let cfg = Config {
         target,
-        language: opts.language.or(file.language).unwrap_or(defaults.language),
+        language: if opts.language.is_empty() {
+            vec![file.language.unwrap_or(defaults.language)]
+        } else {
+            opts.language.clone()
+        },
         mode,
         max_summary_words: opts
             .max_words
@@ -842,7 +848,7 @@ fn main() -> Result<()> {
     let path = opts.path.as_deref().unwrap_or(&default_path);
     if opts.diagnose {
         println!("commentreducr {}", env!("CARGO_PKG_VERSION"));
-        let bad = commentreducr::diagnose(path, target, cfg.language, &cfg.ignore)?;
+        let bad = commentreducr::diagnose(path, target, &cfg.language, &cfg.ignore)?;
         eprintln!("{bad} files with parse errors");
         if bad > 0 {
             std::process::exit(1);

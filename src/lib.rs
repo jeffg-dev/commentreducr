@@ -570,7 +570,7 @@ pub fn check_changed(
     input: Option<&str>,
     remote: Option<&str>,
 ) -> Result<Stats> {
-    let mut cs = changeset::collect(root, range, input, remote, cfg.language, &cfg.ignore)?;
+    let mut cs = changeset::collect(root, range, input, remote, &cfg.language, &cfg.ignore)?;
     if cfg.target == Target::Docstrings {
         cs.files.retain(|f| f.lang == Language::Python);
     }
@@ -585,7 +585,7 @@ pub fn run(root: &Path, cfg: &Config, changed: Option<&str>) -> Result<Stats> {
     ensure!(cfg.llm_concurrency > 0, "workers must be at least 1");
     if let Some(spec) = changed {
         ensure!(cfg.mode == Mode::Reduce, "--changed only applies to reduce");
-        let mut cs = changeset::collect(root, Some(spec), None, None, cfg.language, &cfg.ignore)?;
+        let mut cs = changeset::collect(root, Some(spec), None, None, &cfg.language, &cfg.ignore)?;
         // collect returns repo-relative paths; the target may be a subdirectory or one file.
         let target = std::fs::canonicalize(root)?;
         let top = std::fs::canonicalize(&cs.root)?;
@@ -600,7 +600,7 @@ pub fn run(root: &Path, cfg: &Config, changed: Option<&str>) -> Result<Stats> {
         return reduction::run(root, Vec::new(), cfg, mode);
     }
     let mut tracked = files::tracked_source_files(root, &cfg.ignore)?;
-    tracked.retain(|(_, lang)| cfg.language.matches(*lang));
+    tracked.retain(|(_, lang)| cfg.language.iter().any(|l| l.matches(*lang)));
     if cfg.target == Target::Docstrings {
         tracked.retain(|(_, lang)| *lang == Language::Python);
     }
@@ -710,12 +710,12 @@ fn atomic_write(path: &Path, before: &str, after: &str) -> Result<()> {
 pub fn diagnose(
     root: &Path,
     target: Target,
-    language: Languages,
+    language: &[Languages],
     ignore: &[String],
 ) -> Result<usize> {
     let mut bad = 0;
     let mut tracked = files::tracked_source_files(root, ignore)?;
-    tracked.retain(|(_, lang)| language.matches(*lang));
+    tracked.retain(|(_, lang)| language.iter().any(|l| l.matches(*lang)));
     if target == Target::Docstrings {
         tracked.retain(|(_, lang)| *lang == Language::Python);
     }

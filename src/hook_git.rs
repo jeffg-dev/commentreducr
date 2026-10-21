@@ -98,7 +98,7 @@ pub fn changed_blocks(
     keep_decorators: &[String],
     keep_bases: &[String],
 ) -> Result<(Vec<HookBlock>, usize)> {
-    let set = changeset::collect(repo, range, input, remote, Languages::Python, ignore)?;
+    let set = changeset::collect(repo, range, input, remote, &[Languages::Python], ignore)?;
     let mut output = Vec::new();
     let mut seen = HashSet::new();
     for file in &set.files {

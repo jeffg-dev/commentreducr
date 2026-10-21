@@ -153,8 +153,8 @@ commentreducr check --warn
 
 Both `--scope` and `--language` default to `all`. Scopes are `comments`, `docstrings`,
 and `all`; docstrings means Python module/class/function docstrings. Languages are
-`python`, `typescript`, `rust`, and `all`. `typescript` includes TSX; `all` also includes
-JavaScript and YAML. A path limits the run to a tracked file or directory; omitted means
+`python`, `typescript`, `rust`, `yaml`, and `all`. `typescript` includes JavaScript and
+TSX. Repeat `--language` (or `-l`) to pick several. A path limits the run to a tracked file or directory; omitted means
 `.`. Untracked files, configured ignores, and Git ignore rules are respected. Rust UI
 fixtures with a tracked `.stderr` sibling are skipped because their snapshots pin line numbers.
 

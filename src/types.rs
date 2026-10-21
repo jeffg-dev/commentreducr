@@ -103,6 +103,7 @@ pub enum Languages {
     #[value(name = "typescript")]
     TypeScript,
     Rust,
+    Yaml,
     All,
 }
 
@@ -110,8 +111,12 @@ impl Languages {
     pub fn matches(self, language: Language) -> bool {
         match self {
             Self::Python => language == Language::Python,
-            Self::TypeScript => matches!(language, Language::TypeScript | Language::Tsx),
+            Self::TypeScript => matches!(
+                language,
+                Language::JavaScript | Language::TypeScript | Language::Tsx
+            ),
             Self::Rust => language == Language::Rust,
+            Self::Yaml => language == Language::Yaml,
             Self::All => true,
         }
     }
@@ -129,7 +134,7 @@ pub enum JudgeKind {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub target: Target,
-    pub language: Languages,
+    pub language: Vec<Languages>,
     pub mode: Mode,
     /// Target maximum words for the one-line summary.
     pub max_summary_words: usize,
